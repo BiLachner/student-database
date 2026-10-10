@@ -31,19 +31,20 @@
             <div class="admin-panel-heading">
                 <div>
                     <h2 id="subject-list-heading">Fächerverwaltung</h2>
-                    <p class="admin-panel-intro">Jedes Fach erscheint genau einmal. Facharten nutzen die bestehende Curriculum-Semantik.</p>
+                    <p class="admin-panel-intro">Jedes Fach erscheint genau einmal. Facharten und globale Klassenstufen werden getrennt gespeichert.</p>
                 </div>
                 <span id="subject-list-status" class="admin-inline-status" role="status" aria-live="polite">Fächer werden geladen …</span>
             </div>
             <div class="admin-table-scroll">
                 <table id="subjectList" class="admin-data-table">
-                    <caption class="admin-visually-hidden">Kanonische Fächerliste</caption>
+                    <caption class="admin-visually-hidden">Kanonische Fächerliste mit globaler Klassenstufen-Aktivierung</caption>
                     <thead>
-                        <tr><th scope="col">Fach</th><th scope="col">Typ</th><th scope="col">Zuordnung</th><th scope="col"><span class="admin-visually-hidden">Aktion</span></th></tr>
+                        <tr><th scope="col">Fach</th><th scope="col">Typ</th><th scope="col">Klasse 5</th><th scope="col">Klasse 6</th><th scope="col">Aktionen</th></tr>
                     </thead>
                     <tbody id="subject-list-body"></tbody>
                 </table>
             </div>
+            <p class="admin-panel-note">Die Klassenstufen legen nur die schulweite Verfügbarkeit fest. Individuelle WPF-Zuordnungen bleiben in der Schüler- und Curriculumverwaltung.</p>
         </section>
     </main>
 </section>

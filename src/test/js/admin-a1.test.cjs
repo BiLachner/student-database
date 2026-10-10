@@ -118,7 +118,7 @@ test('subjectManagementShowsRegularWpfAndReligionEthikTypes',async()=>{
   ]});
   try {
     const selects=[...dom.window.document.querySelectorAll('#subject-list-body select')];
-    assert.deepEqual(selects.map(select=>select.value),['REGULAR:','INDIVIDUAL:WPF','INDIVIDUAL:RELIGION_ETHIK']);
+    assert.deepEqual(selects.map(select=>select.value),['INDIVIDUAL:WPF','INDIVIDUAL:RELIGION_ETHIK','REGULAR:']);
     assert.match(dom.window.document.body.textContent,/Religion\/Ethik/);
   } finally { dom.window.close(); }
 });
@@ -157,5 +157,78 @@ test('subjectCreateUsesAtomicNameAndTypeEndpoint',async()=>{
     const request=requests.find(item=>item.url==='/add-subject-with-type');
     assert.deepEqual(request.data,{name:'WPF Technik',mode:'INDIVIDUAL',assignmentGroup:'WPF'});
     assert.match(dom.window.document.body.textContent,/Fach wurde angelegt/);
+  } finally { dom.window.close(); }
+});
+
+test('subjectManagementUsesCatalogAndRendersGradeConstraintsFromStructuredFields',async()=>{
+  const {dom,requests}=await setupSubjects({subjects:[
+    {id:1,name:'Deutsch',subjectCode:'DE',mode:'UNSPECIFIED',activeGrades:[5,6]},
+    {id:2,name:'WPF Technik',mode:'INDIVIDUAL',assignmentGroup:'WPF',wpf:true,activeGrades:[6]},
+    {id:3,name:'Ethik01',mode:'INDIVIDUAL',assignmentGroup:'RELIGION_ETHIK',activeGrades:[]},
+    {id:4,name:'DEMO – Themen und Münzen 900010',mode:'UNSPECIFIED',activeGrades:[]}
+  ]});
+  try {
+    assert.equal(requests[0].url,'/subject-management-catalog');
+    const rows=[...dom.window.document.querySelectorAll('#subject-list-body tr')];
+    assert.equal(rows.length,4);
+    const core=[...rows[0].querySelectorAll('input[type=checkbox]')];
+    const wpf=[...rows[1].querySelectorAll('input[type=checkbox]')];
+    const religion=[...rows[2].querySelectorAll('input[type=checkbox]')];
+    const other=[...rows[3].querySelectorAll('input[type=checkbox]')];
+    assert.deepEqual(core.map(input=>input.disabled),[false,false]);
+    assert.deepEqual(wpf.map(input=>input.disabled),[true,false]);
+    assert.deepEqual(religion.map(input=>input.disabled),[true,true]);
+    assert.deepEqual(other.map(input=>input.disabled),[true,true]);
+    assert.match(dom.window.document.body.textContent,/Reguläres SOL-Fach/);
+    assert.match(dom.window.document.body.textContent,/DEMO – Themen und Münzen 900010/);
+  } finally { dom.window.close(); }
+});
+
+test('subjectGradeSaveSendsOneCompleteRequestAndUsesCanonicalResponse',async()=>{
+  const dom=new JSDOM(`<!doctype html><body>${subjectsHtml()}</body>`,{url:'https://school.invalid/manage_subjects',runScripts:'outside-only'});
+  const requests=[];
+  dom.window.fetch=async (url,options={})=>{
+    requests.push({url,data:options.body?JSON.parse(options.body):null});
+    if(url==='/subject-management-catalog') return {ok:true,status:200,json:async()=>[{id:3,name:'Deutsch',subjectCode:'DE',mode:'UNSPECIFIED',activeGrades:[5]}]};
+    return {ok:true,status:200,json:async()=>({subjectId:3,activeGrades:[6]})};
+  };
+  dom.window.eval(subjectManagement);
+  dom.window.document.dispatchEvent(new dom.window.Event('DOMContentLoaded'));
+  await tick();
+  try {
+    const row=dom.window.document.querySelector('#subject-list-body tr');
+    const boxes=[...row.querySelectorAll('input[type=checkbox]')];
+    boxes[0].checked=true; boxes[1].checked=true;
+    const save=[...row.querySelectorAll('button')].find(button=>button.textContent.includes('Klassenstufen'));
+    save.click(); await tick();
+    assert.deepEqual(requests.filter(request=>request.url==='/set-subject-grade-activations').map(request=>request.data),[
+      {subjectId:3,grades:[5,6]}
+    ]);
+    assert.deepEqual(boxes.map(box=>box.checked),[false,true]);
+    assert.match(dom.window.document.body.textContent,/Klassenstufen gespeichert/);
+  } finally { dom.window.close(); }
+});
+
+test('subjectGradeSaveRollsBackAndPreventsDuplicateRequests',async()=>{
+  const dom=new JSDOM(`<!doctype html><body>${subjectsHtml()}</body>`,{url:'https://school.invalid/manage_subjects',runScripts:'outside-only'});
+  const requests=[];
+  dom.window.fetch=async (url,options={})=>{
+    requests.push({url,data:options.body?JSON.parse(options.body):null});
+    if(url==='/subject-management-catalog') return {ok:true,status:200,json:async()=>[{id:3,name:'Deutsch',subjectCode:'DE',activeGrades:[6]}]};
+    await tick();
+    return {ok:false,status:500,json:async()=>({error:'internal_error'})};
+  };
+  dom.window.eval(subjectManagement);
+  dom.window.document.dispatchEvent(new dom.window.Event('DOMContentLoaded'));
+  await tick();
+  try {
+    const row=dom.window.document.querySelector('#subject-list-body tr');
+    const boxes=[...row.querySelectorAll('input[type=checkbox]')];
+    boxes[0].checked=true;
+    const save=[...row.querySelectorAll('button')].find(button=>button.textContent.includes('Klassenstufen'));
+    save.click(); save.click(); await new Promise(resolve=>setTimeout(resolve,50));
+    assert.equal(requests.filter(request=>request.url==='/set-subject-grade-activations').length,1);
+    assert.deepEqual(boxes.map(box=>box.checked),[false,true]);
+    assert.match(dom.window.document.body.textContent,/konnte nicht gespeichert werden/);
   } finally { dom.window.close(); }
 });
