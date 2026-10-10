@@ -30,6 +30,8 @@ class CurriculumTest {
         service=new Curriculum(db);id=sequence.getAndAdd(100);topic=id;
         // Synthetic records only, in the test server's database; unique IDs avoid shared-cache collisions.
         db.writeTransaction(c->{
+            exec(c,"CREATE TABLE IF NOT EXISTS course_group_flexible_task_releases (course_group INTEGER NOT NULL, flexible_task INTEGER NOT NULL, active INTEGER NOT NULL CHECK(active IN (0,1)), PRIMARY KEY(course_group,flexible_task))");
+            exec(c,"CREATE TABLE IF NOT EXISTS course_group_flexible_topic_releases (course_group INTEGER NOT NULL, flexible_topic INTEGER NOT NULL, active INTEGER NOT NULL CHECK(active IN (0,1)), PRIMARY KEY(course_group,flexible_topic))");
             exec(c,"CREATE TABLE IF NOT EXISTS curriculum_class_tutors (semester INTEGER NOT NULL REFERENCES semesters(id), class INTEGER NOT NULL REFERENCES classes(id), teacher INTEGER NOT NULL REFERENCES teachers(id), tutor_slot INTEGER NOT NULL CHECK(tutor_slot IN (1,2)), PRIMARY KEY (semester,class,tutor_slot), UNIQUE (semester,class,teacher))");
             exec(c,"CREATE TABLE IF NOT EXISTS student_graduation_history (id INTEGER PRIMARY KEY, student INTEGER NOT NULL REFERENCES students(id), old_graduation_level INTEGER NOT NULL, new_graduation_level INTEGER NOT NULL, changed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, teacher INTEGER NOT NULL REFERENCES teachers(id), semester INTEGER NOT NULL REFERENCES semesters(id))");
             exec(c,"INSERT INTO subjects(id,name) VALUES(?,?)",id,"Mathematik-"+id);
@@ -850,7 +852,9 @@ class CurriculumTest {
     @Test void legacyUnscheduledAndIndividualRemainUntouched()throws Exception {
         var legacy=UnscheduledTask.addUnscheduledTask("Legacy-"+id,SchoolClass.get(id),Subject.get(id),6);
         db.writeTransaction(c->{exec(c,"INSERT INTO completed_unscheduled_tasks(student,unscheduled_task) VALUES(?,?)",id,legacy.getId());return null;});
-        db.createTables();db.migrateTables();db.createTables();
+        // Migration 027 is exercised against isolated PROD-/DEMO-like fixtures;
+        // this shared legacy fixture deliberately remains pre-migration.
+        db.createTables();db.createTables();
         assertEquals(6,UnscheduledTask.get(legacy.getId()).getMaxTokens());
         assertEquals(1,scalar("SELECT COUNT(*) FROM completed_unscheduled_tasks WHERE student=? AND unscheduled_task=?",id,legacy.getId()));
         service.create(teacher,scope,"Legacy-"+id,5);assertEquals(0,service.completedTokens(id,scope));

@@ -47,6 +47,7 @@ class StudentActiveMigrationTest {
     void freshlyCreatedStudentsTableHasActiveDefaultOne(@TempDir Path directory) throws Exception {
         try (SQLiteConnection connection = new SQLiteConnection(directory.resolve("fresh-students").toString())) {
             connection.createTables();
+            seedCanonicalSubjects(connection);
             connection.migrateTables();
 
             try (Statement statement = connection.getSQLConnection().createStatement();
@@ -70,6 +71,7 @@ class StudentActiveMigrationTest {
     void currentSchemaSkipsLegacyReplaysAndPreservesDataAcrossRepeatedCalls(@TempDir Path directory) throws Exception {
         try (SQLiteConnection connection = new SQLiteConnection(directory.resolve("current-schema").toString())) {
             connection.createTables();
+            seedCanonicalSubjects(connection);
             connection.executeVoidProcessSecure("INSERT INTO students VALUES (101, 'Active', 'Student', 'active@example.test', 'hash-a', 11, 2, 1)");
             connection.executeVoidProcessSecure("INSERT INTO students VALUES (102, 'Archived', 'Student', 'archived@example.test', 'hash-b', 12, 3, 0)");
             connection.executeVoidProcessSecure("INSERT INTO topics(id,name,subject,grade,resource,number,semester) VALUES (201, 'Guard Topic', 301, 9, 'guard-resource', 4, 401)");
@@ -146,5 +148,9 @@ class StudentActiveMigrationTest {
             assertTrue(result.next());
             return result.getString(1);
         }
+    }
+
+    private static void seedCanonicalSubjects(SQLiteConnection connection) throws Exception {
+        connection.executeVoidProcessSecure("INSERT INTO subjects(id,name) VALUES (1,'Deutsch'),(2,'Englisch'),(3,'Mathematik'),(4,'Naturwissenschaften'),(5,'Gesellschaftslehre')");
     }
 }

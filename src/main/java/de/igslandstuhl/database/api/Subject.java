@@ -69,6 +69,17 @@ public class Subject implements APIObject {
         return name;
     }
 
+    /** Returns the nullable stable machine identity introduced by migration 027. */
+    public String getSubjectCode() {
+        try {
+            return Server.getInstance().processSingleRequest(fields -> fields[0],
+                    "get_subject_code_by_id", new String[] {"subject_code"}, String.valueOf(id));
+        } catch (SQLException e) {
+            Application.LOGGER_API.error("Failed to retrieve subject code for subject '{}'", id, e);
+            return null;
+        }
+    }
+
     /** Stable display metadata shared by student-facing subject views. */
     public String getDisplayName() {
         return displayName(name);

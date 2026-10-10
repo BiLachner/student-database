@@ -86,12 +86,18 @@ class CentralCurriculumImportTest {
         try (SQLiteConnection legacy = new SQLiteConnection(dir.resolve("legacy").toString())) {
             try (Statement s = legacy.getSQLConnection().createStatement()) {
                 s.executeUpdate("CREATE TABLE subjects(id INTEGER PRIMARY KEY,name TEXT)");
+                s.executeUpdate("CREATE TABLE curriculum_subject_types(subject INTEGER PRIMARY KEY,wpf INTEGER NOT NULL DEFAULT 0,mode TEXT NOT NULL,assignment_group TEXT)");
                 s.executeUpdate("CREATE TABLE semesters(id INTEGER PRIMARY KEY,label TEXT,position INTEGER,school_year INTEGER)");
                 s.executeUpdate("CREATE TABLE topics(id INTEGER PRIMARY KEY,name TEXT NOT NULL,subject INTEGER NOT NULL,grade INTEGER NOT NULL,resource TEXT,number INTEGER NOT NULL,semester INTEGER,UNIQUE(name,subject,grade),UNIQUE(grade,subject,number))");
                 s.executeUpdate("CREATE TABLE tasks(id INTEGER PRIMARY KEY,topic INTEGER NOT NULL,name TEXT NOT NULL,niveau INTEGER NOT NULL,tokens INTEGER NOT NULL,UNIQUE(topic,name))");
                 s.executeUpdate("CREATE TABLE students(id INTEGER PRIMARY KEY,first_name TEXT,last_name TEXT,email TEXT,password TEXT,class INTEGER,graduation_level INTEGER)");
                 s.executeUpdate("CREATE TABLE taskstats(student INTEGER NOT NULL,task INTEGER NOT NULL,status INTEGER NOT NULL,PRIMARY KEY(student,task))");
                 s.executeUpdate("INSERT INTO subjects VALUES(1,'Alt')");
+                s.executeUpdate("INSERT INTO subjects VALUES(1001,'Deutsch')");
+                s.executeUpdate("INSERT INTO subjects VALUES(1002,'Englisch')");
+                s.executeUpdate("INSERT INTO subjects VALUES(1003,'Mathematik')");
+                s.executeUpdate("INSERT INTO subjects VALUES(1004,'Naturwissenschaften')");
+                s.executeUpdate("INSERT INTO subjects VALUES(1005,'Gesellschaftslehre')");
                 s.executeUpdate("INSERT INTO semesters VALUES(1,'Alt HJ',1,1)");
                 s.executeUpdate("INSERT INTO topics VALUES(1,'Alt Thema',1,5,NULL,1,1)");
                 s.executeUpdate("INSERT INTO tasks VALUES(10,1,'B',2,6)");

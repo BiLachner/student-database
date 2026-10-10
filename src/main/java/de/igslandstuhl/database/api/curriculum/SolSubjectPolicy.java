@@ -15,8 +15,7 @@ import java.util.Set;
  */
 final class SolSubjectPolicy {
     static final String WPF = "WPF";
-    private static final Set<String> CORE = Set.of(
-            "Deutsch", "Englisch", "Mathematik", "Naturwissenschaften", "Gesellschaftslehre");
+    private static final Set<String> CORE_CODES = Set.of("DE", "EN", "MATH", "NAWI", "GL");
 
     private SolSubjectPolicy() {}
 
@@ -26,6 +25,30 @@ final class SolSubjectPolicy {
 
     static boolean isAllowed(Connection c, int grade, int subject) throws SQLException {
         if (!isManagedGrade(grade)) return true;
+        if (SubjectGradeActivationRepository.schemaAvailable(c)) {
+            return isAllowedWithStableIdentity(c, grade, subject);
+        }
+        // Databases predating migration 027 retain the former policy until startup
+        // applies the migration. This branch is intentionally unreachable for a
+        // migrated application database and keeps legacy test/upgrade databases usable.
+        return isAllowedLegacy(c, grade, subject);
+    }
+
+    private static boolean isAllowedWithStableIdentity(Connection c, int grade, int subject) throws SQLException {
+        var row = Curriculum.require(c,
+                "SELECT s.subject_code,COALESCE(t.mode,'REGULAR') AS mode,t.assignment_group "
+                        + "FROM subjects s LEFT JOIN curriculum_subject_types t ON t.subject=s.id WHERE s.id=?", subject);
+        if (!SubjectGradeActivationRepository.isActive(c, subject, grade)) return false;
+        String subjectCode = row.get("subject_code") == null ? null : String.valueOf(row.get("subject_code"));
+        String mode = String.valueOf(row.get("mode"));
+        String group = row.get("assignment_group") == null ? null
+                : String.valueOf(row.get("assignment_group")).strip().toUpperCase(Locale.ROOT);
+        if (subjectCode != null && CORE_CODES.contains(subjectCode)) return true;
+        if ("INDIVIDUAL".equals(mode)) return grade == 6 && WPF.equals(group);
+        return false;
+    }
+
+    private static boolean isAllowedLegacy(Connection c, int grade, int subject) throws SQLException {
         var row = Curriculum.require(c,
                 "SELECT s.name,COALESCE(t.mode,'REGULAR') AS mode,t.assignment_group "
                         + "FROM subjects s LEFT JOIN curriculum_subject_types t ON t.subject=s.id WHERE s.id=?", subject);
@@ -33,7 +56,8 @@ final class SolSubjectPolicy {
         String group = row.get("assignment_group") == null ? null
                 : String.valueOf(row.get("assignment_group")).strip().toUpperCase(Locale.ROOT);
         if ("INDIVIDUAL".equals(mode)) return grade == 6 && WPF.equals(group);
-        return !isManagedGrade(grade) || CORE.contains(Subject.displayName(String.valueOf(row.get("name"))));
+        return !isManagedGrade(grade) || Set.of("Deutsch", "Englisch", "Mathematik", "Naturwissenschaften", "Gesellschaftslehre")
+                .contains(Subject.displayName(String.valueOf(row.get("name"))));
     }
 
     static void requireAllowed(Connection c, int grade, int subject) throws SQLException {
@@ -51,9 +75,15 @@ final class SolSubjectPolicy {
     static List<Integer> activeSubjectIds(Connection c, int grade) throws SQLException {
         if (!isManagedGrade(grade)) return List.of();
         Set<Integer> ids = new LinkedHashSet<>();
-        for (var row : Curriculum.rows(c, "SELECT id FROM subjects ORDER BY id")) {
-            int subject = Curriculum.integer(row, "id");
-            if (isAllowed(c, grade, subject)) ids.add(subject);
+        if (SubjectGradeActivationRepository.schemaAvailable(c)) {
+            for (int subject : SubjectGradeActivationRepository.activeSubjectIds(c, grade)) {
+                if (isAllowed(c, grade, subject)) ids.add(subject);
+            }
+        } else {
+            for (var row : Curriculum.rows(c, "SELECT id FROM subjects ORDER BY id")) {
+                int subject = Curriculum.integer(row, "id");
+                if (isAllowed(c, grade, subject)) ids.add(subject);
+            }
         }
         return List.copyOf(ids);
     }

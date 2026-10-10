@@ -84,27 +84,39 @@ public class SQLiteConnection implements AutoCloseable, PreparedStatementSupplie
             Pattern migrations=Pattern.compile(".*migrations.+\\.sql");
             for (var resource:Server.getInstance().getResourceManager().getResources(migrations)) {
                 if (legacyComplete && resource.resource().matches("0(?:0[1-9]|1[0-9]|20)_.*\\.sql")) continue;
+                if (resource.resource().startsWith("027_") && !hasTable("subjects")) continue;
+                Connection connection=getSQLConnection();
+                boolean autoCommit=connection.getAutoCommit();
+                connection.setAutoCommit(false);
                 try (BufferedReader in=new BufferedReader(new java.io.InputStreamReader(
                         Server.getInstance().getResourceManager().openResourceAsStream(resource), java.nio.charset.StandardCharsets.UTF_8))) {
                     String request = Server.getInstance().getResourceManager().readResourceCompletely(in);
-                    for (String statement : splitSqlScript(request)) {
-                        try {
-                            supplier.executeUpdate(statement);
-                        } catch (SQLException e) {
-                            if (e.getMessage() != null && (
-                                    e.getMessage().toLowerCase().contains("duplicate column name")
-                                    || e.getMessage().toLowerCase().contains("no such column")
-                                    || e.getMessage().toLowerCase().contains("no such table")
-                                    || e.getMessage().toLowerCase().contains("already exists")
-                                )) {
-                                LOGGER.debug("Skipping already applied migration statement: {}", statement);
-                            } else {
-                                throw e;
+                    try {
+                        for (String statement : splitSqlScript(request)) {
+                            try {
+                                supplier.executeUpdate(statement);
+                            } catch (SQLException e) {
+                                if (e.getMessage() != null && (
+                                        e.getMessage().toLowerCase().contains("duplicate column name")
+                                        || e.getMessage().toLowerCase().contains("no such column")
+                                        || e.getMessage().toLowerCase().contains("no such table")
+                                        || e.getMessage().toLowerCase().contains("already exists")
+                                    )) {
+                                    LOGGER.debug("Skipping already applied migration statement: {}", statement);
+                                } else {
+                                    throw e;
+                                }
                             }
                         }
+                        connection.commit();
+                    } catch (SQLException | RuntimeException e) {
+                        try { connection.rollback(); } catch (SQLException rollback) { e.addSuppressed(rollback); }
+                        throw e;
                     }
                 } catch (IOException e) {
                     throw new IllegalStateException(e);
+                } finally {
+                    connection.setAutoCommit(autoCommit);
                 }
             }
         } finally {
@@ -120,6 +132,14 @@ public class SQLiteConnection implements AutoCloseable, PreparedStatementSupplie
             try (ResultSet result = statement.executeQuery()) {
                 return result.next();
             }
+        }
+    }
+
+    boolean hasTable(String table) throws SQLException {
+        try (PreparedStatement statement = getSQLConnection().prepareStatement(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1")) {
+            statement.setString(1, table);
+            try (ResultSet result = statement.executeQuery()) { return result.next(); }
         }
     }
     static List<String> splitSqlScript(String script) {
