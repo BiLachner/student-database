@@ -23,6 +23,8 @@ public final class CurriculumRequestHandler {
                 "/central-curriculum-overview","/preview-central-curriculum-import","/import-central-curriculum",
                 "/curriculum-students","/assign-curriculum-context","/curriculum-transfer-preview","/transfer-curriculum-context","/curriculum-enrollment-catalog","/add-subject-with-type","/curriculum-course-groups","/curriculum-tutor-assignments","/set-curriculum-subject-type","/assign-grade-curriculum","/assign-individual-grade-teacher","/assign-class-tutors","/curriculum-wpf-roster","/assign-curriculum-wpf","/create-curriculum-semester","/activate-curriculum-semester"))
             HttpHandler.registerPostRequestHandler(path,AccessLevel.ADMIN,CurriculumRequestHandler::handle);
+        for(String path:List.of("/subject-management-catalog","/set-subject-grade-activations"))
+            HttpHandler.registerPostRequestHandler(path,AccessLevel.ADMIN,CurriculumRequestHandler::handle);
         HttpHandler.registerPostRequestHandler("/set-curriculum-stage-assessment",AccessLevel.TEACHER,CurriculumRequestHandler::handle);
         for(String path:List.of("/flexible-task-delete-preview","/delete-flexible-task","/flexible-topic-delete-preview","/delete-flexible-topic"))
             HttpHandler.registerPostRequestHandler(path,AccessLevel.USER,CurriculumRequestHandler::handle);
@@ -161,9 +163,21 @@ public final class CurriculumRequestHandler {
             if(rq.getPath().equals("/curriculum-teacher-roster") && rq.getJson().isEmpty())
                 return PostResponse.jsonWithNulls(service.schoolwideStageOverview(actor),rq);
             CurriculumEnrollment enrollment=new CurriculumEnrollment(service);
+            SubjectManagementService subjectManagement=new SubjectManagementService(service);
             Object result;
             boolean includeNulls=false;
             switch(rq.getPath()) {
+                case "/subject-management-catalog" -> {
+                    if(!rq.getJson().isEmpty()) throw new CurriculumException(400,"invalid_input","No selection is accepted.");
+                    result=subjectManagement.catalog(actor);
+                }
+                case "/set-subject-grade-activations" -> {
+                    if(!rq.getJson().keySet().equals(Set.of("subjectId","grades")))
+                        throw new CurriculumException(400,"invalid_input","subjectId and grades are required.");
+                    List<Integer> grades=new ArrayList<>();
+                    for(Object value:list(rq,"grades")) grades.add(integer(value,"grade"));
+                    result=subjectManagement.replaceActivations(actor,integer(rq,"subjectId"),grades);
+                }
                 case "/curriculum-enrollment-catalog" -> result=enrollment.catalog(actor);
                 case "/add-subject-with-type" -> {
                     Set<String> allowed=Set.of("name","mode","assignmentGroup");

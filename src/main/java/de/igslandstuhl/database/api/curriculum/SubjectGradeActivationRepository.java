@@ -42,4 +42,19 @@ final class SubjectGradeActivationRepository {
         }
         return List.copyOf(subjects);
     }
+
+    static void replace(Connection c, int subject, List<Integer> grades) throws SQLException {
+        try (var delete = c.prepareStatement("DELETE FROM subject_grade_activation WHERE subject=?")) {
+            delete.setInt(1, subject);
+            delete.executeUpdate();
+        }
+        try (var insert = c.prepareStatement("INSERT INTO subject_grade_activation(subject,grade) VALUES(?,?)")) {
+            for (int grade : grades) {
+                insert.setInt(1, subject);
+                insert.setInt(2, grade);
+                insert.addBatch();
+            }
+            insert.executeBatch();
+        }
+    }
 }
