@@ -213,19 +213,42 @@ public final class CurriculumEnrollment {
         return curriculum.transaction(c->{
             String subjectArchive = tableExists(c,"archived_subjects") ? " WHERE NOT EXISTS (SELECT 1 FROM archived_subjects a WHERE a.subject=s.id)" : "";
             String teacherArchive = tableExists(c,"archived_teachers") ? " WHERE NOT EXISTS (SELECT 1 FROM archived_teachers a WHERE a.teacher=teachers.id)" : "";
-            return Map.of(
-                "subjects",rows(c,"SELECT s.id,s.name,CASE WHEN t.mode='INDIVIDUAL' AND t.assignment_group='WPF' THEN 1 ELSE 0 END AS wpf,COALESCE(t.mode,'REGULAR') AS mode,t.assignment_group AS assignmentGroup,CASE WHEN t.subject IS NULL THEN 0 ELSE 1 END AS typeExplicit FROM subjects s LEFT JOIN curriculum_subject_types t ON t.subject=s.id"+subjectArchive+" ORDER BY s.name"),
-                "classes",rows(c,"SELECT id,label,grade FROM classes WHERE active=1 AND id<>0 ORDER BY grade,label"),
-                "semesters",rows(c,"SELECT s.id,s.label,s.school_year AS schoolYearId,y.label AS schoolYearLabel,COALESCE(s.archived,0) AS archived,CASE WHEN y.current_semester=s.id THEN 1 ELSE 0 END AS active FROM semesters s JOIN school_years y ON y.id=s.school_year ORDER BY s.school_year,s.position"),
-                "teachers",rows(c,"SELECT id,first_name,last_name FROM teachers"+teacherArchive+" ORDER BY last_name,first_name"),
-                "teaching",rows(c,"SELECT teacher AS teacherId,class AS classId,NULL AS grade,subject AS subjectId,semester AS semesterId FROM curriculum_class_teachers UNION SELECT teacher AS teacherId,NULL AS classId,grade,subject AS subjectId,semester AS semesterId FROM curriculum_grade_teachers"),
-                "gradeSubjects",rows(c,"SELECT grade,semester AS semesterId,subject AS subjectId FROM curriculum_grade_subjects"),
-                "nextSemesterPreview",semesterPreview(c));
+            String subjectCode = columnExists(c,"subjects","subject_code") ? "s.subject_code" : "NULL";
+            List<Map<String,Object>> subjects = rows(c,"SELECT s.id,s.name,"+subjectCode+" AS subjectCode,"
+                    + "CASE WHEN t.mode='INDIVIDUAL' AND t.assignment_group='WPF' THEN 1 ELSE 0 END AS wpf,"
+                    + "COALESCE(t.mode,'UNSPECIFIED') AS mode,t.assignment_group AS assignmentGroup,"
+                    + "CASE WHEN t.subject IS NULL THEN 0 ELSE 1 END AS typeExplicit,"
+                    + "CASE WHEN t.mode='INDIVIDUAL' THEN 0 WHEN t.mode='REGULAR' OR "+subjectCode+" IN ('DE','EN','MATH','NAWI','GL') THEN 1 ELSE 0 END AS regularEligible"
+                    + " FROM subjects s LEFT JOIN curriculum_subject_types t ON t.subject=s.id"+subjectArchive+" ORDER BY s.name");
+            boolean activationSchema = SubjectGradeActivationRepository.schemaAvailable(c);
+            Map<String,Object> activeSubjectIdsByGrade = new LinkedHashMap<>();
+            for (int grade : List.of(5,6))
+                activeSubjectIdsByGrade.put(String.valueOf(grade), SolSubjectPolicy.activeSubjectIds(c, grade));
+            if (activationSchema) {
+                for (Map<String,Object> subject : subjects)
+                    subject.put("activeGrades", SubjectGradeActivationRepository.activeGrades(c, integer(subject,"id")));
+            }
+            Map<String,Object> result = new LinkedHashMap<>();
+            result.put("subjects",subjects);
+            result.put("activeSubjectIdsByGrade",activationSchema ? activeSubjectIdsByGrade : null);
+            result.put("classes",rows(c,"SELECT id,label,grade FROM classes WHERE active=1 AND id<>0 ORDER BY grade,label"));
+            result.put("semesters",rows(c,"SELECT s.id,s.label,s.school_year AS schoolYearId,y.label AS schoolYearLabel,COALESCE(s.archived,0) AS archived,CASE WHEN y.current_semester=s.id THEN 1 ELSE 0 END AS active FROM semesters s JOIN school_years y ON y.id=s.school_year ORDER BY s.school_year,s.position"));
+            result.put("teachers",rows(c,"SELECT id,first_name,last_name FROM teachers"+teacherArchive+" ORDER BY last_name,first_name"));
+            result.put("teaching",rows(c,"SELECT teacher AS teacherId,class AS classId,NULL AS grade,subject AS subjectId,semester AS semesterId FROM curriculum_class_teachers UNION SELECT teacher AS teacherId,NULL AS classId,grade,subject AS subjectId,semester AS semesterId FROM curriculum_grade_teachers"));
+            result.put("gradeSubjects",rows(c,"SELECT grade,semester AS semesterId,subject AS subjectId FROM curriculum_grade_subjects"));
+            result.put("nextSemesterPreview",semesterPreview(c));
+            return result;
         });
     }
 
     private static boolean tableExists(Connection c,String name) throws SQLException {
         try(PreparedStatement s=c.prepareStatement("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?")){s.setString(1,name);try(ResultSet r=s.executeQuery()){return r.next()&&r.getLong(1)>0;}}
+    }
+    private static boolean columnExists(Connection c,String table,String column) throws SQLException {
+        try(Statement statement=c.createStatement();ResultSet rows=statement.executeQuery("PRAGMA table_info("+table+")")) {
+            while(rows.next()) if(column.equalsIgnoreCase(rows.getString("name"))) return true;
+            return false;
+        }
     }
     public List<Map<String,Object>> courseGroups(Actor actor,Integer semesterId,Integer grade,String assignmentGroup) throws SQLException {
         admin(actor);
@@ -349,7 +372,13 @@ public final class CurriculumEnrollment {
         admin(actor);
         String finalGroup=assignmentGroup==null?"WPF":assignmentGroup.strip().toUpperCase(Locale.ROOT);
         return curriculum.transaction(c->{require(c,"SELECT id FROM classes WHERE id=? AND active=1 AND id<>0",classId);require(c,"SELECT id FROM semesters WHERE id=?",semester);
-            return rows(c,"SELECT s.id,s.first_name,s.last_name,w.subject AS subjectId FROM students s LEFT JOIN curriculum_individual_assignments w ON w.student=s.id AND w.semester=? AND w.assignment_group=? WHERE s.class=? ORDER BY s.last_name,s.first_name,s.id",semester,finalGroup,classId);
+            int grade=integer(require(c,"SELECT grade FROM classes WHERE id=?",classId),"grade");
+            List<Map<String,Object>> result=rows(c,"SELECT s.id,s.first_name,s.last_name,w.subject AS subjectId FROM students s LEFT JOIN curriculum_individual_assignments w ON w.student=s.id AND w.semester=? AND w.assignment_group=? WHERE s.class=? ORDER BY s.last_name,s.first_name,s.id",semester,finalGroup,classId);
+            for (Map<String,Object> row : result) {
+                Object subjectId=row.get("subjectId");
+                row.put("subjectGloballyAvailable", subjectId != null && SolSubjectPolicy.isAllowed(c, grade, integer(row,"subjectId")));
+            }
+            return result;
         });
     }
     public void assignWpf(Actor actor,int student,Scope scope,Integer expectedSubject) throws SQLException {

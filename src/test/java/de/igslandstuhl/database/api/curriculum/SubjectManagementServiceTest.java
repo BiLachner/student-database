@@ -90,6 +90,35 @@ class SubjectManagementServiceTest {
         assertEquals(401, assertThrows(CurriculumException.class, () -> service.catalog(null)).status);
     }
 
+    @Test
+    void curriculumCatalogExposesActivationAndRegularEligibilityForMissingCoreTypeRows() throws Exception {
+        Map<String, Object> catalog = new CurriculumEnrollment(new Curriculum(database)).catalog(admin);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> subjects = (List<Map<String, Object>>) catalog.get("subjects");
+        Map<String, Object> german = subjects.stream().filter(row -> ((Number) row.get("id")).intValue() == 1).findFirst().orElseThrow();
+        assertEquals("DE", german.get("subjectCode"));
+        assertEquals("UNSPECIFIED", german.get("mode"));
+        assertEquals(1, german.get("regularEligible"));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> active = (Map<String, Object>) catalog.get("activeSubjectIdsByGrade");
+        assertEquals(List.of(1, 2, 3, 4, 5), active.get("5"));
+        assertEquals(List.of(1, 2, 3, 4, 5, 10), active.get("6"));
+    }
+
+    @Test
+    void clearingGlobalActivationDoesNotDeleteSemesterAssignment() throws Exception {
+        database.writeTransaction(c -> { insert(c, "INSERT INTO curriculum_grade_subjects(grade,semester,subject) VALUES(5,1,1)"); return null; });
+        service.replaceActivations(admin, 1, List.of(6));
+        assertEquals(1, scalar("SELECT COUNT(*) FROM curriculum_grade_subjects WHERE grade=5 AND semester=1 AND subject=1"));
+    }
+
+    private long scalar(String sql) throws Exception {
+        try (var statement = database.getSQLConnection().prepareStatement(sql); var result = statement.executeQuery()) {
+            assertTrue(result.next());
+            return result.getLong(1);
+        }
+    }
+
     private static void insert(java.sql.Connection c, String sql) throws java.sql.SQLException {
         try (PreparedStatement statement = c.prepareStatement(sql)) { statement.executeUpdate(); }
     }

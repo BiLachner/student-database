@@ -59,11 +59,11 @@ async function setup(admin, options={}){
   const data=JSON.parse(requestOptions.body);requests.push({url,data});let body;let ok=true;
   if(options.response?.url===url)return {ok:false,status:options.response.status,text:async()=>options.response.body};
   const tasks=byClass.get(data.classId)||[];
- if(options.enrollment && url==='/curriculum-enrollment-catalog')body={...catalog,gradeSubjects:[{grade:5,semesterId:20,subjectId:1}],nextSemesterPreview:{label:'2026_27_HJ2',schoolYear:'2026/27',semester:2,newSchoolYear:false,frameCopied:true,tutorsCopied:true},subjects:[{id:1,name:'Math',wpf:0,mode:'REGULAR',assignmentGroup:null,typeExplicit:1},{id:4,name:'WPF Kunst',wpf:1,mode:'INDIVIDUAL',assignmentGroup:'WPF',typeExplicit:1},{id:5,name:'WPF Technik',wpf:1,mode:'INDIVIDUAL',assignmentGroup:'WPF',typeExplicit:1},{id:6,name:'Evangelische Religion',wpf:0,mode:'INDIVIDUAL',assignmentGroup:'RELIGION_ETHIK',typeExplicit:1},{id:7,name:'Ethik',wpf:0,mode:'INDIVIDUAL',assignmentGroup:'RELIGION_ETHIK',typeExplicit:1}],teaching:options.teaching ?? [{classId:10,subjectId:1,teacherId:7,semesterId:20},{classId:11,subjectId:1,teacherId:7,semesterId:20},{grade:5,subjectId:4,teacherId:7,semesterId:20},{grade:5,subjectId:5,teacherId:7,semesterId:20},{grade:5,subjectId:6,teacherId:7,semesterId:20},{grade:5,subjectId:7,teacherId:7,semesterId:20}]};
+  if(options.enrollment && url==='/curriculum-enrollment-catalog')body={...catalog,gradeSubjects:options.gradeSubjects ?? [{grade:5,semesterId:20,subjectId:1}],activeSubjectIdsByGrade:options.activeSubjectIdsByGrade,nextSemesterPreview:{label:'2026_27_HJ2',schoolYear:'2026/27',semester:2,newSchoolYear:false,frameCopied:true,tutorsCopied:true},classes:options.enrollmentClasses ?? catalog.classes,subjects:options.enrollmentSubjects ?? [{id:1,name:'Math',wpf:0,mode:'REGULAR',assignmentGroup:null,typeExplicit:1},{id:4,name:'WPF Kunst',wpf:1,mode:'INDIVIDUAL',assignmentGroup:'WPF',typeExplicit:1},{id:5,name:'WPF Technik',wpf:1,mode:'INDIVIDUAL',assignmentGroup:'WPF',typeExplicit:1},{id:6,name:'Evangelische Religion',wpf:0,mode:'INDIVIDUAL',assignmentGroup:'RELIGION_ETHIK',typeExplicit:1},{id:7,name:'Ethik',wpf:0,mode:'INDIVIDUAL',assignmentGroup:'RELIGION_ETHIK',typeExplicit:1}],teaching:options.teaching ?? [{classId:10,subjectId:1,teacherId:7,semesterId:20},{classId:11,subjectId:1,teacherId:7,semesterId:20},{grade:5,subjectId:4,teacherId:7,semesterId:20},{grade:5,subjectId:5,teacherId:7,semesterId:20},{grade:5,subjectId:6,teacherId:7,semesterId:20},{grade:5,subjectId:7,teacherId:7,semesterId:20}]};
   else if(options.enrollment && url==='/assign-grade-curriculum')body={students:2,assignments:2};
   else if(options.enrollment && url==='/assign-individual-grade-teacher')body={ok:true};
   else if(options.enrollment && url==='/curriculum-course-groups')body=options.courseGroups||[];
-  else if(options.enrollment && url==='/curriculum-wpf-roster')body=[{id:50,first_name:'Test',last_name:'Kind',subjectId:null,teacherId:null}];
+  else if(options.enrollment && url==='/curriculum-wpf-roster')body=options.wpfRosterHandler?await options.wpfRosterHandler(data):(options.roster ?? [{id:50,first_name:'Test',last_name:'Kind',subjectId:null,teacherId:null}]);
   else if(options.enrollment && url==='/assign-curriculum-wpf')body={ok:true};
   else if(url==='/curriculum-releases')body={topics:releaseTopics,tasks:releaseTasks,flexibleTopics:releaseFlexibleTopics,flexibleTasks:releaseFlexibleTasks};
   else if(url==='/set-curriculum-release'){
@@ -799,6 +799,39 @@ test('admin grade batch uses the single global semester selector',async()=>{
   let selects=panel.querySelectorAll('.semester-create-panel .curriculum-wpf-table select');assert.equal(selects[0].value,'7');assert.equal(selects[1].value,'');
   const semester=dom.window.document.querySelector('[data-global-semester]');assert.ok(semester);semester.value='21';semester.dispatchEvent(new dom.window.Event('change'));await clickNamed(dom,panel,'Lehrkräfte-Tabelle aufbauen');
   selects=panel.querySelectorAll('.semester-create-panel .curriculum-wpf-table select');assert.equal(selects[0].value,'');assert.equal(selects[1].value,'7');
+ }finally{dom.window.close();}
+});
+test('curriculum regular picker uses global activation and preserves inactive assignments',async()=>{
+ const subjects=[
+  {id:1,name:'Deutsch',subjectCode:'DE',mode:'UNSPECIFIED',regularEligible:true},
+  {id:2,name:'Englisch',subjectCode:'EN',mode:'UNSPECIFIED',regularEligible:true},
+  {id:4,name:'WPF Französisch',mode:'INDIVIDUAL',assignmentGroup:'WPF',wpf:1},
+  {id:8,name:'Musik',mode:'UNSPECIFIED',regularEligible:false}
+ ];
+ const {dom,root}=await setup(true,{enrollment:true,enrollmentSubjects:subjects,enrollmentClasses:[{id:10,label:'5a',grade:5},{id:11,label:'6a',grade:6}],activeSubjectIdsByGrade:{'5':[1],'6':[1,2,4]},gradeSubjects:[{grade:5,semesterId:20,subjectId:2}],teaching:[]});try{
+  const panel=root.querySelector('.curriculum-enrollment');await clickNamed(dom,panel,'Jetzt verwalten');await clickNamed(dom,panel,'Auswahl bestätigen');
+  const picker=panel.querySelector('.admin-regular-subject-picker');assert.ok(picker);
+  assert.equal(picker.querySelector('input[value="1"]').disabled,false);
+  const legacy=picker.querySelector('input[value="2"]');assert.equal(legacy.disabled,true);assert.match(picker.textContent,/Global nicht mehr aktiv/);
+  assert.equal(picker.querySelector('input[value="4"]'),null);
+  assert.equal(picker.querySelector('input[value="8"]'),null);
+ }finally{dom.window.close();}
+});
+test('curriculum WPF roster filters new targets and keeps an inactive current assignment',async()=>{
+ const subjects=[
+  {id:1,name:'Deutsch',subjectCode:'DE',mode:'UNSPECIFIED',regularEligible:true},
+  {id:4,name:'WPF Französisch',mode:'INDIVIDUAL',assignmentGroup:'WPF',wpf:1},
+  {id:5,name:'WPF Ökologie',mode:'INDIVIDUAL',assignmentGroup:'WPF',wpf:1},
+  {id:6,name:'Religion',mode:'INDIVIDUAL',assignmentGroup:'RELIGION_ETHIK',wpf:0}
+ ];
+ const {dom,root}=await setup(true,{enrollment:true,enrollmentSubjects:subjects,enrollmentClasses:[{id:10,label:'5a',grade:5},{id:11,label:'6a',grade:6}],activeSubjectIdsByGrade:{'5':[1],'6':[1,4]},teaching:[],roster:[{id:50,first_name:'Ada',last_name:'Alpha',subjectId:5,subjectGloballyAvailable:false,teacherId:null}]});try{
+  const panel=root.querySelector('.curriculum-enrollment');await clickNamed(dom,panel,'Jetzt verwalten');
+  const grade=panel.querySelector('#grade-setup select');assert.ok(grade);grade.value='6';grade.dispatchEvent(new dom.window.Event('change'));await tick();await clickNamed(dom,panel,'Auswahl bestätigen');
+  const group=[...panel.querySelectorAll('select')].find(select=>[...select.options].some(option=>option.value==='WPF'));assert.ok(group);group.value='WPF';group.dispatchEvent(new dom.window.Event('change'));await tick();await clickNamed(dom,panel,'Zuordnungen laden');
+  const subjectSelect=panel.querySelector('.curriculum-wpf-board table tr:nth-child(2) select');assert.ok(subjectSelect);
+  assert.ok(subjectSelect.querySelector('option[value="4"]'));
+  const inactive=subjectSelect.querySelector('option[value="5"]');assert.ok(inactive);assert.equal(inactive.disabled,false);assert.match(subjectSelect.parentElement.parentElement.textContent,/Aktuelle Zuordnung, global nicht mehr aktiv/);
+  assert.equal(subjectSelect.querySelector('option[value="6"]'),null);
  }finally{dom.window.close();}
 });
 test('individual subject groups save independently through the guarded assignment endpoint',async()=>{

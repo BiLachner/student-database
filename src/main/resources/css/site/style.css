@@ -330,6 +330,7 @@ body:has(.admin-shell) > header { display:none; }
 .admin-subject-actions { min-width:13rem; }
 .admin-subject-actions > * { margin:.15rem 0; }
 .admin-panel-note { margin:.9rem 0 0; color:var(--admin-muted); font-size:.9rem; }
+.admin-legacy-assignment-badge { display:inline-block; margin-left:.4rem; padding:.12rem .35rem; border:1px solid var(--admin-border); border-radius:.3rem; color:var(--admin-muted); background:var(--admin-sandstone-100); font-size:.82rem; }
 .admin-empty-state { padding:1.25rem !important; color:var(--admin-muted); text-align:center; }
 .admin-table-scroll { position:relative; max-width:100%; overflow-x:auto; }
 .admin-table-scroll table { min-width:45rem; }
