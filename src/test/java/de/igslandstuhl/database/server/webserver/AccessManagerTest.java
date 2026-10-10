@@ -1,6 +1,7 @@
 package de.igslandstuhl.database.server.webserver;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -11,9 +12,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import de.igslandstuhl.database.api.User;
+import de.igslandstuhl.database.Registry;
 import de.igslandstuhl.database.server.webserver.access.AccessManager;
 import de.igslandstuhl.database.server.webserver.requests.GetRequest;
 import de.igslandstuhl.database.server.webserver.requests.HttpRequest;
+import de.igslandstuhl.database.server.webserver.requests.RequestType;
 
 public class AccessManagerTest {
     private HttpRequest getRequest = new GetRequest("GET /login HTTP/1.1", "127.0.0.1", false);
@@ -155,5 +158,16 @@ public class AccessManagerTest {
         assertFalse(AccessManager.getInstance().hasAccess(student, "/teacher", getRequest));
         assertFalse(AccessManager.getInstance().hasAccess(teacher, "/teacher", getRequest));
         assertTrue(AccessManager.getInstance().hasAccess(admin, "/teacher", getRequest));
+    }
+
+    @Test
+    public void subjectManagementPostRoutesAreRegisteredAndAccessControlled() {
+        for (String path : new String[]{"/subject-management-catalog", "/set-subject-grade-activations"}) {
+            assertNotNull(Registry.webPathRegistry().get(WebPath.PathInfo.get(path, RequestType.POST)), path);
+            assertTrue(AccessManager.getInstance().hasAccess(admin, path, getRequest, RequestType.POST), path);
+            assertFalse(AccessManager.getInstance().hasAccess(teacher, path, getRequest, RequestType.POST), path);
+            assertFalse(AccessManager.getInstance().hasAccess(student, path, getRequest, RequestType.POST), path);
+            assertFalse(AccessManager.getInstance().hasAccess(anonymous, path, getRequest, RequestType.POST), path);
+        }
     }
 }

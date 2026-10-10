@@ -538,6 +538,18 @@
         "namespaces": [],
         "access_level": "admin"
     },
+    "/subject-management-catalog": {
+        "type": "POST",
+        "handler_type": "PostRequestHandler",
+        "namespaces": [],
+        "access_level": "admin"
+    },
+    "/set-subject-grade-activations": {
+        "type": "POST",
+        "handler_type": "PostRequestHandler",
+        "namespaces": [],
+        "access_level": "admin"
+    },
     "/curriculum-course-groups": {
         "type": "POST",
         "handler_type": "PostRequestHandler",
