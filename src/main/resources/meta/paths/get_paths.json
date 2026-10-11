@@ -379,6 +379,13 @@
         "context": "js",
         "access_level": "admin"
     },
+    "/student-individual-matrix.js": {
+        "type": "GET",
+        "handler_type": "FileRequestHandler",
+        "namespaces": ["admin"],
+        "context": "js",
+        "access_level": "admin"
+    },
 
     "/style.css": {
         "type": "GET",

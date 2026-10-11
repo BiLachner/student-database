@@ -434,6 +434,43 @@ public final class CurriculumEnrollment {
             return result;
         });
     }
+
+    /** Compact, class-scoped read model for the student individual-subject matrix. */
+    public Map<String,Object> individualStudentMatrix(Actor actor,int semester,int grade,int classId) throws SQLException {
+        admin(actor);
+        return curriculum.transaction(c -> {
+            require(c,"SELECT id FROM semesters WHERE id=?",semester);
+            var schoolClass=require(c,"SELECT id,label,grade FROM classes WHERE id=? AND active=1 AND id<>0",classId);
+            if (integer(schoolClass,"grade") != grade)
+                throw error(400,"invalid_input","Die Klasse gehört nicht zum ausgewählten Jahrgang.");
+            String archive = tableExists(c,"archived_subjects")
+                    ? " AND NOT EXISTS (SELECT 1 FROM archived_subjects archived WHERE archived.subject=s.id)" : "";
+            List<Map<String,Object>> subjects = rows(c,
+                    "SELECT s.id,s.name,t.mode,t.assignment_group AS assignmentGroup "
+                    + "FROM subjects s JOIN curriculum_subject_types t ON t.subject=s.id "
+                    + "WHERE t.mode='INDIVIDUAL' AND t.assignment_group IN ('RELIGION_ETHIK','WPF')" + archive
+                    + " ORDER BY s.name,s.id");
+            for (Iterator<Map<String,Object>> it=subjects.iterator(); it.hasNext();) {
+                if (!SolSubjectPolicy.isAllowed(c,grade,integer(it.next(),"id"))) it.remove();
+            }
+            List<Map<String,Object>> students=rows(c,
+                    "SELECT s.id,s.first_name,s.last_name "
+                    + "FROM students s WHERE s.class=? AND s.active=1 "
+                    + "ORDER BY s.last_name,s.first_name,s.id",classId);
+            for (Map<String,Object> student : students) {
+                int studentId=integer(student,"id");
+                for (String group : List.of("RELIGION_ETHIK","WPF")) {
+                    var assignment=rows(c,"SELECT subject FROM curriculum_individual_assignments WHERE student=? AND semester=? AND assignment_group=?",studentId,semester,group);
+                    student.put(group.equals("WPF") ? "wpfSubjectId" : "religionEthikSubjectId",
+                            assignment.isEmpty() ? null : integer(assignment.get(0),"subject"));
+                }
+            }
+            Map<String,Object> result=new LinkedHashMap<>();
+            result.put("semesterId",semester); result.put("grade",grade); result.put("classId",classId);
+            result.put("classLabel",schoolClass.get("label")); result.put("subjects",subjects); result.put("students",students);
+            return result;
+        });
+    }
     public void assignWpf(Actor actor,int student,Scope scope,Integer expectedSubject) throws SQLException {
         assignIndividual(actor,student,scope.subjectId(),scope.classId(),scope.semesterId(),"WPF",expectedSubject);
     }
@@ -470,6 +507,45 @@ public final class CurriculumEnrollment {
             write(c,"INSERT INTO curriculum_enrolled_students(student,semester,grade) VALUES(?,?,?) ON CONFLICT(student,semester) DO NOTHING",student,semester,grade);
             write(c,"INSERT INTO curriculum_individual_assignments(student,semester,assignment_group,subject) VALUES(?,?,?,?) ON CONFLICT(student,semester,assignment_group) DO UPDATE SET subject=excluded.subject",student,semester,finalGroup,subject);
             return null;
+        });
+    }
+
+    /** Canonical student assignment mutation shared by Religion/Ethik and WPF. */
+    public Map<String,Object> assignIndividualSubject(Actor actor,int student,int semester,int classId,
+            int grade,String assignmentGroup,Integer subject,Integer expectedSubject) throws SQLException {
+        admin(actor);
+        String finalGroup=assignmentGroup==null?"":assignmentGroup.strip().toUpperCase(Locale.ROOT);
+        if (!Set.of("WPF","RELIGION_ETHIK").contains(finalGroup))
+            throw error(400,"invalid_input","Ungültige INDIVIDUAL-Zuordnungsgruppe.");
+        return curriculum.transaction(c -> {
+            require(c,"SELECT id FROM semesters WHERE id=?",semester);
+            var schoolClass=require(c,"SELECT id,grade FROM classes WHERE id=? AND active=1 AND id<>0",classId);
+            int classGrade=integer(schoolClass,"grade");
+            if (classGrade != grade)
+                throw error(400,"invalid_input","Der ausgewählte Jahrgang passt nicht zur Klasse.");
+            require(c,"SELECT id FROM students WHERE id=? AND class=? AND active=1",student,classId);
+            if (number(c,"SELECT COUNT(*) FROM curriculum_enrolled_students WHERE student=? AND semester=? AND grade=?",student,semester,classGrade)==0)
+                throw error(400,"invalid_input","Der Schüler ist in diesem Halbjahr nicht im ausgewählten Jahrgangskontext eingeschrieben.");
+            var current=rows(c,"SELECT subject FROM curriculum_individual_assignments WHERE student=? AND semester=? AND assignment_group=?",student,semester,finalGroup);
+            Integer old=current.isEmpty()?null:integer(current.get(0),"subject");
+            if (!Objects.equals(old,expectedSubject))
+                throw error(409,"context_conflict","Individual assignment changed; refresh the list.");
+            if (subject!=null) {
+                require(c,"SELECT id FROM subjects WHERE id=?",subject);
+                if (tableExists(c,"archived_subjects") && number(c,"SELECT COUNT(*) FROM archived_subjects WHERE subject=?",subject)>0)
+                    throw error(400,"subject_not_allowed","Archivierte Fächer können nicht zugeordnet werden.");
+                var type=require(c,"SELECT mode,assignment_group FROM curriculum_subject_types WHERE subject=?",subject);
+                String mode=type.get("mode")==null?null:String.valueOf(type.get("mode")).strip().toUpperCase(Locale.ROOT);
+                String group=type.get("assignment_group")==null?null:String.valueOf(type.get("assignment_group")).strip().toUpperCase(Locale.ROOT);
+                if (!"INDIVIDUAL".equals(mode) || !finalGroup.equals(group))
+                    throw error(400,"invalid_input","Das Fach gehört nicht zur angeforderten INDIVIDUAL-Gruppe.");
+                SolSubjectPolicy.requireAllowed(c,classGrade,subject);
+            }
+            if (subject==null) write(c,"DELETE FROM curriculum_individual_assignments WHERE student=? AND semester=? AND assignment_group=?",student,semester,finalGroup);
+            else write(c,"INSERT INTO curriculum_individual_assignments(student,semester,assignment_group,subject) VALUES(?,?,?,?) ON CONFLICT(student,semester,assignment_group) DO UPDATE SET subject=excluded.subject",student,semester,finalGroup,subject);
+            Map<String,Object> result=new LinkedHashMap<>();
+            result.put("studentId",student); result.put("semesterId",semester); result.put("assignmentGroup",finalGroup); result.put("subjectId",subject);
+            return result;
         });
     }
     /* Compatibility overload: the teacher in the old scope is ignored. */
