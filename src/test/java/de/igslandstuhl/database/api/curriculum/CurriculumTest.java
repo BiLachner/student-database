@@ -1916,6 +1916,23 @@ class CurriculumTest {
         assertEquals(Status.FORBIDDEN,request(Student.get(id),"/assign-individual-grade-teacher",payload).getStatus());
         assertEquals(Status.BAD_REQUEST,request(adminUser,"/assign-individual-grade-teacher",payload.replace("\"grade\":13,","\"grade\":13,\"courseGroupId\":1,")).getStatus());
     }
+
+    @Test void individualAssignmentMaintainsCourseGroupMembershipWithoutStartupRepair() throws Exception {
+        var enrollment=enrollmentFixture();
+        moveFixtureToGrade6();
+        enrollment.subjectType(admin,id+1,"INDIVIDUAL","WPF");
+        db.writeTransaction(c->{
+            exec(c,"INSERT INTO curriculum_grade_teachers(semester,grade,subject,teacher) VALUES(?,?,?,?)",id,6,id+1,id);
+            exec(c,"INSERT INTO curriculum_enrolled_students(student,semester,grade) VALUES(?,?,6)",id,id);
+            return null;
+        });
+        enrollment.assignIndividualSubject(admin,id,id,id,6,"WPF",id+1,null);
+        assertEquals(1,scalar("SELECT COUNT(*) FROM course_groups WHERE subject=? AND grade=6 AND semester=?",id+1,id));
+        assertEquals(1,scalar("SELECT COUNT(*) FROM course_group_members m JOIN course_groups g ON g.id=m.course_group WHERE m.student=? AND g.subject=? AND g.semester=?",id,id+1,id));
+        enrollment.assignIndividualSubject(admin,id,id,id,6,"WPF",null,id+1);
+        assertEquals(0,scalar("SELECT COUNT(*) FROM curriculum_individual_assignments WHERE student=? AND semester=? AND assignment_group='WPF'",id,id));
+        assertEquals(0,scalar("SELECT COUNT(*) FROM course_group_members m JOIN course_groups g ON g.id=m.course_group WHERE m.student=? AND g.subject=? AND g.semester=?",id,id+1,id));
+    }
     @Test void archivedClassMovesStudentsToSystemClassAndStopsCurrentContext() throws Exception {
         SchoolClass.get(id).delete();
         assertEquals(1,scalar("SELECT COUNT(*) FROM students WHERE id=?",id));

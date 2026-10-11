@@ -373,6 +373,7 @@ public final class CurriculumEnrollment {
             write(c,"DELETE FROM curriculum_grade_teachers WHERE semester=? AND grade=? AND subject=?",semester,grade,subject);
             write(c,"DELETE FROM student_curriculum_contexts WHERE semester=? AND subject=? AND grade=?",semester,subject,grade);
             write(c,"DELETE FROM curriculum_individual_assignments WHERE semester=? AND subject=?",semester,subject);
+            write(c,"DELETE FROM course_group_members WHERE course_group IN (SELECT id FROM course_groups WHERE subject=? AND grade=? AND semester=?) AND NOT EXISTS (SELECT 1 FROM student_curriculum_contexts WHERE student=course_group_members.student AND course_group=course_group_members.course_group)",subject,grade,semester);
             return null;
         });
     }
@@ -511,6 +512,7 @@ public final class CurriculumEnrollment {
             Integer old=current.isEmpty()?null:integer(current.get(0),"subject");
             if (!Objects.equals(old,expectedSubject))
                 throw error(409,"context_conflict","Individual assignment changed; refresh the list.");
+            Integer selectedCourseGroup=null;
             if (subject!=null) {
                 require(c,"SELECT id FROM subjects WHERE id=?",subject);
                 if (tableExists(c,"archived_subjects") && number(c,"SELECT COUNT(*) FROM archived_subjects WHERE subject=?",subject)>0)
@@ -521,13 +523,31 @@ public final class CurriculumEnrollment {
                 if (!"INDIVIDUAL".equals(mode) || !finalGroup.equals(group))
                     throw error(400,"invalid_input","Das Fach gehört nicht zur angeforderten INDIVIDUAL-Gruppe.");
                 SolSubjectPolicy.requireAllowed(c,classGrade,subject);
+                int teacher=integer(require(c,"SELECT teacher FROM curriculum_grade_teachers WHERE semester=? AND grade=? AND subject=?",semester,classGrade,subject),"teacher");
+                var subjectRow=require(c,"SELECT name FROM subjects WHERE id=?",subject);
+                write(c,"INSERT INTO course_groups(subject,grade,semester,teacher,assignment_group,name) VALUES(?,?,?,?,?,?) ON CONFLICT(subject,grade,semester) DO UPDATE SET teacher=excluded.teacher,assignment_group=excluded.assignment_group,name=excluded.name",
+                        subject,classGrade,semester,teacher,finalGroup,String.valueOf(subjectRow.get("name")));
+                selectedCourseGroup=integer(require(c,"SELECT id FROM course_groups WHERE subject=? AND grade=? AND semester=?",subject,classGrade,semester),"id");
             }
-            if (subject==null) write(c,"DELETE FROM curriculum_individual_assignments WHERE student=? AND semester=? AND assignment_group=?",student,semester,finalGroup);
-            else write(c,"INSERT INTO curriculum_individual_assignments(student,semester,assignment_group,subject) VALUES(?,?,?,?) ON CONFLICT(student,semester,assignment_group) DO UPDATE SET subject=excluded.subject",student,semester,finalGroup,subject);
+            if (subject==null) {
+                write(c,"DELETE FROM curriculum_individual_assignments WHERE student=? AND semester=? AND assignment_group=?",student,semester,finalGroup);
+                if (old!=null) removeOrphanedMembership(c,student,old,classGrade,semester);
+            } else {
+                if (old!=null && !Objects.equals(old,subject)) removeOrphanedMembership(c,student,old,classGrade,semester);
+                write(c,"INSERT INTO curriculum_individual_assignments(student,semester,assignment_group,subject) VALUES(?,?,?,?) ON CONFLICT(student,semester,assignment_group) DO UPDATE SET subject=excluded.subject",student,semester,finalGroup,subject);
+                write(c,"INSERT INTO course_group_members(course_group,student) VALUES(?,?) ON CONFLICT(course_group,student) DO NOTHING",selectedCourseGroup,student);
+            }
             Map<String,Object> result=new LinkedHashMap<>();
             result.put("studentId",student); result.put("semesterId",semester); result.put("assignmentGroup",finalGroup); result.put("subjectId",subject);
             return result;
         });
+    }
+
+    private static void removeOrphanedMembership(Connection c,int student,int subject,int grade,int semester) throws SQLException {
+        var groups=rows(c,"SELECT id FROM course_groups WHERE subject=? AND grade=? AND semester=?",subject,grade,semester);
+        if(groups.isEmpty()) return;
+        int group=integer(groups.get(0),"id");
+        write(c,"DELETE FROM course_group_members WHERE course_group=? AND student=? AND NOT EXISTS (SELECT 1 FROM student_curriculum_contexts WHERE student=? AND course_group=?)",group,student,student,group);
     }
     static void requireSelectedWpf(Connection c,int student,int subject,int semester) throws SQLException {
         if(Curriculum.individualSubject(c,subject)) {

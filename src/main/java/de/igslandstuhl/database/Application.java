@@ -13,13 +13,13 @@ import de.igslandstuhl.database.api.SerializationException;
 import de.igslandstuhl.database.api.Subject;
 import de.igslandstuhl.database.api.Topic;
 import de.igslandstuhl.database.api.curriculum.CourseGroupA2Backfill;
-import de.igslandstuhl.database.api.curriculum.CourseGroupBackfill;
 import de.igslandstuhl.database.client.HTMLTemplate;
 import de.igslandstuhl.database.events.EventListener;
 import de.igslandstuhl.database.holidays.Holiday;
 import de.igslandstuhl.database.plugins.PluginLoader;
 import de.igslandstuhl.database.server.Server;
 import de.igslandstuhl.database.server.commands.Command;
+import de.igslandstuhl.database.server.sql.SQLiteConnection;
 import de.igslandstuhl.database.server.webserver.WebPath;
 import de.igslandstuhl.database.server.webserver.handlers.GetRequestHandler;
 import de.igslandstuhl.database.server.webserver.handlers.PostRequestHandler;
@@ -125,6 +125,11 @@ public final class Application {
         Registry.builtinPluginRegistry().register("plugin-loader", de.igslandstuhl.database.plugins.PluginLoader.class);
     }
 
+    static void initializeDatabase(SQLiteConnection connection) throws SQLException {
+        connection.createTables();
+        connection.migrateTables();
+    }
+
     public static void main(String[] args) throws Exception {
         LOGGER.info("Starting up student-database...");
 
@@ -144,14 +149,7 @@ public final class Application {
 
         LOGGER.info("Setting up server...");
 
-        Server.getInstance().getConnection().createTables();
-        Server.getInstance().getConnection().migrateTables();
-        // CourseGroup data transitions are part of normal startup, after the
-        // additive schema migrations have completed.  Both operations are
-        // idempotent and transactional; keeping them here ensures an
-        // upgraded database cannot run with only the new nullable columns
-        // while its individual-subject data is still class-scoped.
-        CourseGroupBackfill.run(Server.getInstance().getConnection().getSQLConnection());
+        initializeDatabase(Server.getInstance().getConnection());
         CourseGroupA2Backfill.run(Server.getInstance().getConnection().getSQLConnection());
 
         Holiday.setupCurrentSchoolYear();

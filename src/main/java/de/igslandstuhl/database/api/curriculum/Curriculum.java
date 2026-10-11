@@ -709,9 +709,15 @@ public final class Curriculum {
         if(transfers==null) throw error(400,"invalid_input","Explicit completion mappings required.");
         transaction(c->{
             var from=transferSource(c,student,target);
+            Integer oldCourseGroup=null;
+            var existingContext=rows(c,"SELECT course_group FROM student_curriculum_contexts WHERE student=? AND subject=? AND semester=?",student,target.subjectId(),target.semesterId());
+            if(!existingContext.isEmpty() && existingContext.get(0).get("course_group")!=null)
+                oldCourseGroup=integer(existingContext.get(0),"course_group");
             if(!assignmentScope(from,target.subjectId(),target.semesterId()).equals(expectedSource))
                 throw error(409,"context_conflict","Assignment changed; reload the transfer preview.");
             int grade=validateTransferTarget(c,student,target,integer(from,"grade"));
+            Integer targetCourseGroup=individualSubject(c,target.subjectId())
+                    ? CourseGroup.resolve(c,target.subjectId(),grade,target.semesterId()).id() : null;
             var completed=activeTasks(c,student,target.subjectId(),target.semesterId());
             Map<Integer,FlexibleTask> sources=new HashMap<>();for(var task:completed)sources.put(task.id(),task);
             Set<Integer> seenSources=new HashSet<>(),seenTargets=new HashSet<>();
@@ -731,9 +737,14 @@ public final class Curriculum {
                 write(c,"INSERT INTO curriculum_completion_transfers(student,source_task,target_task) VALUES(?,?,?)",student,source.id(),destination.id());
             }
             compatibleCompletions(c,student,target,grade);
-            write(c,"INSERT INTO student_curriculum_contexts(student,subject,semester,teacher,class,grade) VALUES(?,?,?,?,?,?) "
-                    + "ON CONFLICT(student,subject,semester) DO UPDATE SET teacher=excluded.teacher,class=excluded.class,grade=excluded.grade",
-                    student,target.subjectId(),target.semesterId(),target.teacherId(),target.classId(),grade);
+            write(c,"INSERT INTO student_curriculum_contexts(student,subject,semester,teacher,class,grade,course_group) VALUES(?,?,?,?,?,?,?) "
+                    + "ON CONFLICT(student,subject,semester) DO UPDATE SET teacher=excluded.teacher,class=excluded.class,grade=excluded.grade,course_group=excluded.course_group",
+                    student,target.subjectId(),target.semesterId(),target.teacherId(),target.classId(),grade,targetCourseGroup);
+            if(targetCourseGroup!=null) {
+                write(c,"INSERT INTO course_group_members(course_group,student) VALUES(?,?) ON CONFLICT(course_group,student) DO NOTHING",targetCourseGroup,student);
+                if(oldCourseGroup!=null && !oldCourseGroup.equals(targetCourseGroup))
+                    write(c,"DELETE FROM course_group_members WHERE course_group=? AND student=? AND NOT EXISTS (SELECT 1 FROM student_curriculum_contexts WHERE student=? AND course_group=?)",oldCourseGroup,student,student,oldCourseGroup);
+            }
             return null;
         });
     }
