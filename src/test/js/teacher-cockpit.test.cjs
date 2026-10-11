@@ -8,6 +8,7 @@ const root=path.join(__dirname,'../../main/resources');
 const html=fs.readFileSync(path.join(root,'html/teacher/dashboard.html'),'utf8');
 const script=fs.readFileSync(path.join(root,'js/teacher/build_dashboard.js'),'utf8');
 const navigationScript=fs.readFileSync(path.join(root,'js/site/teacher-dashboard-navigation.js'),'utf8');
+const teacherNavigationScript=fs.readFileSync(path.join(root,'js/site/teacher-navigation.js'),'utf8');
 const navigation=JSON.parse(fs.readFileSync(path.join(root,'meta/navigation/navigation_elements.json'),'utf8'));
 
 function dashboard(hash='') {
@@ -35,6 +36,41 @@ test('teacher cockpit contains canonical core sections without legacy teacher da
   assert.doesNotMatch(html.slice(html.indexOf('id="student-progress"'),html.indexOf('id="tutor-area"')),/weekly-conversations-mount/);
   assert.doesNotMatch(html,/%\[teacher_infos\]/);
   assert.doesNotMatch(html,/WPF|Zuordnung speichern|assign-curriculum|curriculum-enrollment/);
+});
+
+test('teacher dashboard is fail-safe before navigation javascript runs',()=>{
+  const dom=new JSDOM(html.replace('%[site;title=Lehrer-Dashboard;content=!FOLLOWS]','').replace('%[teacher_dashboard_nav]','<ul></ul>'));
+  try {
+    assert.deepEqual(visiblePages(dom.window.document),['overview']);
+    assert.equal(dom.window.document.querySelector('#tutor-area').hidden,true);
+  } finally { dom.window.close(); }
+});
+
+test('real teacher dashboard restores tutor area and switches exactly one section',async()=>{
+  const nav='<ul><li><a href="/dashboard#overview">Übersicht</a></li><li><a href="/dashboard#curriculum">Themen &amp; Etappen</a></li><li><a href="/dashboard#student-progress">Schülerfortschritt</a></li></ul>';
+  const dom=new JSDOM(html
+    .replace('%[site;title=Lehrer-Dashboard;content=!FOLLOWS]','')
+    .replace('%[teacher_dashboard_nav]',nav)
+    .replace(/<script[^>]*><\/script>/g,''),
+    {url:'https://school.example.invalid/dashboard',runScripts:'outside-only'});
+  dom.window.fetch=async path => path === '/my-tutor-classes'
+    ? ({ok:true,status:200,json:async()=>[{semesterId:4,classId:7}]})
+    : ({ok:true,status:200,json:async()=>[]});
+  try {
+    dom.window.eval(navigationScript);
+    dom.window.eval(teacherNavigationScript);
+    dom.window.document.dispatchEvent(new dom.window.Event('DOMContentLoaded'));
+    await new Promise(resolve=>setTimeout(resolve,0));
+    const tutorLink=dom.window.document.querySelector('a[href="/dashboard#tutor-area"]');
+    assert.ok(tutorLink);
+    dom.window.location.hash='#tutor-area';
+    dom.window.dispatchEvent(new dom.window.Event('hashchange'));
+    assert.deepEqual(visiblePages(dom.window.document),['tutor-area']);
+    dom.window.location.hash='#student-progress';
+    dom.window.dispatchEvent(new dom.window.Event('hashchange'));
+    assert.deepEqual(visiblePages(dom.window.document),['student-progress']);
+    assert.equal(dom.window.document.querySelectorAll('.teacher-function-page:not([hidden])').length,1);
+  } finally { dom.window.close(); }
 });
 
 test('teacher dashboard bootstrap keeps plugin lifecycle without legacy fetches',async()=>{

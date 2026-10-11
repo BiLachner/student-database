@@ -32,6 +32,12 @@ class StaticTutorResourcePathsTest {
     }
 
     @Test
+    void teacherDashboardNavigationIsRegisteredAsTeacherJavascriptResource() {
+        assertPath("/teacher-dashboard-navigation.js", "site", AccessLevel.TEACHER,
+                "site", "teacher-dashboard-navigation.js");
+    }
+
+    @Test
     void tutorAssignmentsIsRegisteredAsAdminJavascriptResource() {
         assertPath("/tutor-assignments.js", "admin", AccessLevel.ADMIN,
                 "admin", "tutor-assignments.js");
