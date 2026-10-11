@@ -1,285 +1,44 @@
 'use strict';
-
 (() => {
-  const CORE_CODES = new Set(['DE', 'EN', 'MATH', 'NAWI', 'GL']);
-  const SOL_GRADES = [5, 6];
-  const TYPE_OPTIONS = [
-    ['REGULAR:', 'REGULAR · verbindlich für alle'],
-    ['INDIVIDUAL:WPF', 'WPF · individuell'],
-    ['INDIVIDUAL:RELIGION_ETHIK', 'Religion/Ethik · individuell']
-  ];
-
-  const byId = id => document.getElementById(id);
-  const listFrom = value => Array.isArray(value) ? value : Array.isArray(value?.subjects) ? value.subjects : [];
-  const activeGrades = subject => Array.isArray(subject?.activeGrades)
-    ? subject.activeGrades.filter(grade => Number.isInteger(grade)).sort((a, b) => a - b)
-    : [];
-  const subjectKind = subject => {
-    if (CORE_CODES.has(subject?.subjectCode)) return 'SOL_CORE';
-    if (subject?.mode === 'INDIVIDUAL' && String(subject?.assignmentGroup || '').toUpperCase() === 'WPF') return 'WPF';
-    if (String(subject?.assignmentGroup || '').toUpperCase() === 'RELIGION_ETHIK') return 'RELIGION_ETHIK';
-    return 'OTHER';
+  const CORE = new Set(['DE','EN','MATH','NAWI','GL']);
+  const TYPES = [['REGULAR:', 'Reguläres Fach'], ['INDIVIDUAL:RELIGION_ETHIK', 'Religion/Ethik'], ['INDIVIDUAL:WPF', 'WPF']];
+  const id = value => document.getElementById(value);
+  const status = (node, text, state = '') => { if (node) { node.textContent = text; node.dataset.state = state; } };
+  const grades = subject => Array.isArray(subject.activeGrades) ? [...new Set(subject.activeGrades)].sort((a,b) => a-b) : [];
+  const kind = subject => {
+    if (subject.mode === 'UNSPECIFIED' && CORE.has(subject.subjectCode)) return 'REGULAR';
+    if (subject.mode === 'REGULAR') return 'REGULAR';
+    if (subject.mode === 'INDIVIDUAL' && String(subject.assignmentGroup).toUpperCase() === 'WPF') return 'WPF';
+    if (subject.mode === 'INDIVIDUAL' && String(subject.assignmentGroup).toUpperCase() === 'RELIGION_ETHIK') return 'RELIGION_ETHIK';
+    return 'UNSPECIFIED';
   };
-  const kindLabel = kind => ({
-    SOL_CORE: 'Reguläres SOL-Fach',
-    WPF: 'WPF',
-    RELIGION_ETHIK: 'Religion/Ethik',
-    OTHER: 'Nicht klassifiziert'
-  })[kind] || 'Nicht klassifiziert';
-  const canActivate = (subject, grade) => subjectKind(subject) === 'SOL_CORE'
-    || (subjectKind(subject) === 'WPF' && grade === 6);
-  const kindOrder = {SOL_CORE: 0, WPF: 1, RELIGION_ETHIK: 2, OTHER: 3};
-  const typeValue = subject => subject?.mode === 'INDIVIDUAL'
-    ? `INDIVIDUAL:${subject.assignmentGroup || 'WPF'}`
-    : 'REGULAR:';
-  const typeLabel = value => TYPE_OPTIONS.find(([option]) => option === value)?.[1] || 'REGULAR · verbindlich für alle';
-  const setStatus = (node, message, state = '') => {
-    if (!node) return;
-    node.textContent = message;
-    node.dataset.state = state;
-  };
+  const typeValue = subject => kind(subject) === 'REGULAR' ? 'REGULAR:' : `INDIVIDUAL:${subject.assignmentGroup}`;
+  const typeText = subject => kind(subject) === 'REGULAR' ? 'Reguläres Fach' : kind(subject) === 'RELIGION_ETHIK' ? 'Religion/Ethik' : kind(subject) === 'WPF' ? 'WPF' : 'Nicht klassifiziert';
+  const json = async response => { let payload = null; try { payload = await response.json(); } catch {} if (!response.ok) throw new Error(payload?.message || 'request'); return payload; };
+  const catalog = async () => json(await fetch('/subject-management-catalog', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'}));
+  const request = (url, body) => fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)}).then(json);
+  const allowed = (subject, grade) => kind(subject) === 'REGULAR' || kind(subject) === 'RELIGION_ETHIK' || (kind(subject) === 'WPF' && grade === 6);
+  const setBusy = (row, busy) => { row.dataset.busy = busy ? 'true' : 'false'; row.querySelectorAll('button,select,input').forEach(control => control.disabled = busy || control.dataset.locked === 'true'); };
 
-  async function requestCatalog() {
-    const response = await fetch('/subject-management-catalog', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: '{}'
-    });
-    if (!response.ok) throw new Error('catalog');
-    return response.json();
+  function typeSelect(subject, row, rowStatus) {
+    const select = document.createElement('select'); select.setAttribute('aria-label', `Typ für ${subject.name}`); TYPES.forEach(([value,label]) => { const option=document.createElement('option'); option.value=value; option.textContent=label; option.selected=value===typeValue(subject); select.append(option); });
+    if (kind(subject) === 'UNSPECIFIED') { const option=document.createElement('option'); option.value='UNSPECIFIED:'; option.textContent='Nicht klassifiziert'; option.selected=true; option.disabled=true; select.prepend(option); }
+    select.addEventListener('change', async () => { const previous=typeValue(subject); const selected=select.value; if (selected==='UNSPECIFIED:') return; setBusy(row,true); status(rowStatus,'Wird gespeichert …'); try { const [mode,group]=selected.split(':'); await request('/set-curriculum-subject-type',{subjectId:subject.id,mode,assignmentGroup:group||null}); subject.mode=mode; subject.assignmentGroup=group||null; status(rowStatus,'Gespeichert','success'); } catch (error) { select.value=previous; status(rowStatus, error.message.includes('Existing grade') || error.message.includes('incompatible') ? 'Klasse 5 muss zuerst deaktiviert werden, bevor das Fach als WPF geführt werden kann.' : 'Änderung konnte nicht gespeichert werden.','error'); } finally { setBusy(row,false); } });
+    return select;
   }
 
-  async function responseJson(response) {
-    let payload = null;
-    try { payload = await response.json(); } catch { /* use status fallback */ }
-    if (!response.ok) {
-      const message = payload?.message;
-      throw new Error(message || (response.status === 403 ? 'Keine Berechtigung.' : 'request'));
-    }
-    return payload;
+  function grade(subject, gradeNumber, row, rowStatus) {
+    const label=document.createElement('label'); label.className='admin-grade-toggle'; const input=document.createElement('input'); input.type='checkbox'; input.checked=grades(subject).includes(gradeNumber); input.setAttribute('aria-label',`${subject.name}, Klasse ${gradeNumber}`); input.dataset.locked=allowed(subject,gradeNumber)?'false':'true'; input.disabled=!allowed(subject,gradeNumber); const text=document.createElement('span'); text.textContent=input.disabled?'Nicht verfügbar':(input.checked?'Aktiv':'Inaktiv'); label.append(input,text); input.addEventListener('change',async()=>{ const previous=grades(subject); const desired=[...row.querySelectorAll('input[type=checkbox]')].filter(box=>box.checked&&!box.disabled).map(box=>Number(box.dataset.grade)); setBusy(row,true); status(rowStatus,'Wird gespeichert …'); try { const result=await request('/set-subject-grade-activations',{subjectId:subject.id,grades:desired}); subject.activeGrades=Array.isArray(result?.activeGrades)?result.activeGrades:desired; updateGradeLabels(row); status(rowStatus,'Gespeichert','success'); } catch { subject.activeGrades=previous; row.querySelectorAll('input[type=checkbox]').forEach(box=>box.checked=previous.includes(Number(box.dataset.grade))); updateGradeLabels(row); status(rowStatus,'Änderung konnte nicht gespeichert werden.','error'); } finally { setBusy(row,false); } }); input.dataset.grade=String(gradeNumber); return label;
   }
-
-  function appendTypeOptions(select, selected) {
-    TYPE_OPTIONS.forEach(([value, label]) => {
-      const option = document.createElement('option');
-      option.value = value;
-      option.textContent = label;
-      option.selected = value === selected;
-      select.append(option);
-    });
-  }
-
-  function subjectEditLink(subject) {
-    const link = document.createElement('a');
-    link.className = 'admin-action-link admin-subject-edit-link';
-    link.href = `/subject?subjectId=${encodeURIComponent(subject.id)}`;
-    link.textContent = 'Bearbeiten';
-    return link;
-  }
-
-  async function saveType(subject, select, button, rowStatus) {
-    const [mode, assignmentGroup] = select.value.split(':');
-    button.disabled = true;
-    setStatus(rowStatus, 'Wird gespeichert …');
-    try {
-      const response = await fetch('/set-curriculum-subject-type', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-          subjectId: subject.id,
-          mode,
-          assignmentGroup: assignmentGroup || null
-        })
-      });
-      await responseJson(response);
-      subject.mode = mode;
-      subject.assignmentGroup = assignmentGroup || null;
-      setStatus(rowStatus, 'Gespeichert', 'success');
-    } catch {
-      setStatus(rowStatus, 'Fachart konnte nicht gespeichert werden.', 'error');
-      select.value = typeValue(subject);
-    } finally {
-      button.disabled = false;
-    }
-  }
-
-  function gradeControl(subject, grade) {
-    const allowed = canActivate(subject, grade);
-    const label = document.createElement('label');
-    label.className = 'admin-grade-toggle';
-    const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox';
-    checkbox.checked = activeGrades(subject).includes(grade);
-    checkbox.disabled = !allowed;
-    checkbox.dataset.grade = String(grade);
-    checkbox.setAttribute('aria-label', `${subject.name || 'Fach'} Klasse ${grade}`);
-    const explanation = subjectKind(subject) === 'WPF'
-      ? 'WPF ist im aktuellen SOL-Modell erst ab Klasse 6 vorgesehen.'
-      : 'Dieses Fach ist für SOL 5/6 derzeit nicht freigegeben.';
-    if (!allowed) {
-      checkbox.title = explanation;
-      label.title = explanation;
-    }
-    const text = document.createElement('span');
-    text.textContent = allowed ? 'Aktiv' : 'Nicht verfügbar';
-    label.append(checkbox, text);
-    return {label, checkbox};
-  }
-
-  async function saveActivations(subject, controls, button, status) {
-    const previous = activeGrades(subject);
-    button.disabled = true;
-    controls.forEach(control => { control.checkbox.disabled = true; });
-    setStatus(status, 'Klassenstufen werden gespeichert …');
-    const grades = controls
-      .filter(control => control.checkbox.checked && canActivate(subject, Number(control.checkbox.dataset.grade)))
-      .map(control => Number(control.checkbox.dataset.grade));
-    try {
-      const response = await fetch('/set-subject-grade-activations', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({subjectId: subject.id, grades})
-      });
-      const result = await responseJson(response);
-      subject.activeGrades = Array.isArray(result?.activeGrades) ? result.activeGrades : previous;
-      controls.forEach(control => {
-        control.checkbox.checked = subject.activeGrades.includes(Number(control.checkbox.dataset.grade));
-      });
-      setStatus(status, 'Klassenstufen gespeichert.', 'success');
-    } catch (error) {
-      subject.activeGrades = previous;
-      controls.forEach(control => {
-        control.checkbox.checked = previous.includes(Number(control.checkbox.dataset.grade));
-      });
-      setStatus(status, error.message === 'Keine Berechtigung.' ? error.message : 'Die Klassenstufen-Zuordnung konnte nicht gespeichert werden.', 'error');
-    } finally {
-      button.disabled = false;
-      controls.forEach(control => { control.checkbox.disabled = !canActivate(subject, Number(control.checkbox.dataset.grade)); });
-    }
-  }
-
-  function renderSubjects(subjects) {
-    const body = byId('subject-list-body');
-    if (!body) return;
-    body.replaceChildren();
-    if (subjects.length === 0) {
-      const row = document.createElement('tr');
-      const cell = document.createElement('td');
-      cell.colSpan = 5;
-      cell.className = 'admin-empty-state';
-      cell.textContent = 'Noch keine Fächer angelegt.';
-      row.append(cell);
-      body.append(row);
-      return;
-    }
-    [...subjects].sort((a, b) => {
-      const kindDifference = kindOrder[subjectKind(a)] - kindOrder[subjectKind(b)];
-      return kindDifference || String(a.name || '').localeCompare(String(b.name || ''), 'de');
-    }).forEach(subject => {
-      const row = document.createElement('tr');
-      const name = document.createElement('th');
-      name.scope = 'row';
-      const nameText = document.createElement('span');
-      nameText.textContent = subject.name || 'Unbenanntes Fach';
-      name.append(nameText);
-      if (subject.subjectCode) {
-        const code = document.createElement('small');
-        code.className = 'admin-subject-code';
-        code.textContent = subject.subjectCode;
-        name.append(code);
-      }
-      const typeCell = document.createElement('td');
-      const field = document.createElement('div');
-      field.className = 'admin-inline-form';
-      const select = document.createElement('select');
-      select.setAttribute('aria-label', `Fachart für ${subject.name || 'Fach'}`);
-      appendTypeOptions(select, typeValue(subject));
-      const save = document.createElement('button');
-      save.type = 'button';
-      save.textContent = 'Speichern';
-      const rowStatus = document.createElement('span');
-      rowStatus.className = 'admin-inline-status';
-      rowStatus.setAttribute('aria-live', 'polite');
-      save.addEventListener('click', () => saveType(subject, select, save, rowStatus));
-      field.append(select, save);
-      typeCell.append(field, rowStatus);
-      const typeLabelText = document.createElement('span');
-      typeLabelText.className = 'admin-subject-kind';
-      typeLabelText.textContent = kindLabel(subjectKind(subject));
-      typeCell.prepend(typeLabelText);
-      const gradeCells = SOL_GRADES.map(grade => {
-        const cell = document.createElement('td');
-        cell.dataset.label = `Klasse ${grade}`;
-        const control = gradeControl(subject, grade);
-        cell.append(control.label);
-        return {cell, control};
-      });
-      const activationControls = gradeCells.map(item => item.control);
-      const activationButton = document.createElement('button');
-      activationButton.type = 'button';
-      activationButton.textContent = 'Klassenstufen speichern';
-      const activationStatus = document.createElement('span');
-      activationStatus.className = 'admin-inline-status';
-      activationStatus.setAttribute('aria-live', 'polite');
-      activationButton.addEventListener('click', () => saveActivations(subject, activationControls, activationButton, activationStatus));
-      const action = document.createElement('td');
-      action.className = 'admin-subject-actions';
-      action.append(subjectEditLink(subject), activationButton, activationStatus);
-      row.append(name, typeCell, ...gradeCells.map(item => item.cell), action);
-      body.append(row);
-    });
-  }
-
-  async function loadSubjects() {
-    const status = byId('subject-list-status');
-    setStatus(status, 'Fächer werden geladen …');
-    try {
-      const catalog = await requestCatalog();
-      const subjects = listFrom(catalog);
-      renderSubjects(subjects);
-      setStatus(status, `${subjects.length} Fächer`, 'success');
-    } catch {
-      const body = byId('subject-list-body');
-      if (body) body.replaceChildren();
-      setStatus(status, 'Fächer konnten nicht geladen werden.', 'error');
-    }
-  }
-
-  async function createSubject(form) {
-    const status = byId('subject-management-status');
-    const submit = form.querySelector('button[type="submit"]');
-    const name = form.querySelector('[name="name"]')?.value.trim();
-    const value = form.querySelector('[name="subjectType"]')?.value || 'REGULAR:';
-    const [mode, assignmentGroup] = value.split(':');
-    if (!name) return;
-    submit.disabled = true;
-    setStatus(status, 'Fach wird angelegt …');
-    try {
-      const response = await fetch('/add-subject-with-type', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({name, mode, assignmentGroup: assignmentGroup || null})
-      });
-      if (!response.ok) throw new Error('create');
-      form.reset();
-      setStatus(status, 'Fach wurde angelegt.', 'success');
-      await loadSubjects();
-    } catch {
-      setStatus(status, 'Fach konnte nicht angelegt werden.', 'error');
-    } finally {
-      submit.disabled = false;
-    }
-  }
-
-  function init() {
-    const form = byId('manage-subjects-form');
-    if (!form) return;
-    form.addEventListener('submit', event => {
-      event.preventDefault();
-      createSubject(form).catch(() => setStatus(byId('subject-management-status'), 'Fach konnte nicht angelegt werden.', 'error'));
-    });
-    loadSubjects().catch(() => setStatus(byId('subject-list-status'), 'Fächer konnten nicht geladen werden.', 'error'));
-  }
-
-  document.addEventListener('DOMContentLoaded', init);
+  function updateGradeLabels(row) { row.querySelectorAll('.admin-grade-toggle').forEach(label=>{const input=label.querySelector('input'); label.querySelector('span').textContent=input.disabled?'Nicht verfügbar':(input.checked?'Aktiv':'Inaktiv');}); }
+  function menu(subject, row, archived) { const details=document.createElement('details'); const summary=document.createElement('summary'); summary.textContent='⋯'; summary.setAttribute('aria-label',`Aktionen für ${subject.name}`); details.append(summary); const box=document.createElement('div'); box.className='admin-subject-menu'; const rename=document.createElement('button'); rename.type='button'; rename.textContent='Name ändern'; rename.addEventListener('click',()=>openRename(subject)); const archive=document.createElement('button'); archive.type='button'; archive.textContent=archived?'Wiederherstellen':'Archivieren'; archive.addEventListener('click',()=>archiveSubject(subject,archived)); box.append(rename,archive); if (!archived) { const del=document.createElement('button'); del.type='button'; del.textContent='Löschen'; del.addEventListener('click',()=>deleteSubject(subject)); box.append(del); } details.append(box); return details; }
+  function rowFor(subject, archived=false) { const row=document.createElement('tr'); const name=document.createElement('th'); name.scope='row'; const nameText=document.createElement('span'); nameText.className='admin-subject-name'; nameText.textContent=subject.name||'Unbenanntes Fach'; name.append(nameText); if(subject.subjectCode){const code=document.createElement('small');code.className='admin-subject-code';code.textContent=subject.subjectCode;name.append(code);} const typeCell=document.createElement('td'); typeCell.dataset.label='Typ'; const rowStatus=document.createElement('span'); rowStatus.className='admin-inline-status'; rowStatus.setAttribute('aria-live','polite'); if(!archived){ typeCell.append(typeSelect(subject,row,rowStatus)); const c5=document.createElement('td'); c5.dataset.label='Klasse 5'; c5.append(grade(subject,5,row,rowStatus)); const c6=document.createElement('td'); c6.dataset.label='Klasse 6'; c6.append(grade(subject,6,row,rowStatus)); const actions=document.createElement('td'); actions.className='admin-subject-actions'; actions.append(menu(subject,row,false),rowStatus); row.append(name,typeCell,c5,c6,actions); } else { const actions=document.createElement('td'); actions.className='admin-subject-actions'; actions.append(menu(subject,row,true)); row.append(name,typeCell,actions); } return row; }
+  function render(subjects) { const active=id('subject-list-body'), archived=id('archived-subject-list-body'); active.replaceChildren(); archived.replaceChildren(); const live=subjects.filter(s=>!s.archived), old=subjects.filter(s=>s.archived); live.sort((a,b)=>String(a.name).localeCompare(String(b.name),'de')).forEach(s=>active.append(rowFor(s))); old.sort((a,b)=>String(a.name).localeCompare(String(b.name),'de')).forEach(s=>archived.append(rowFor(s,true))); id('archived-subjects').hidden=old.length===0; id('archived-subject-count').textContent=old.length; if(!live.length){const row=document.createElement('tr');const cell=document.createElement('td');cell.colSpan=5;cell.textContent='Noch keine aktiven Fächer angelegt.';row.append(cell);active.append(row);} }
+  async function loadCatalog() { status(id('subject-list-status'),'Fächer werden geladen …'); try { const data=await catalog(); const subjects=Array.isArray(data)?data:data.subjects||[]; render(subjects); status(id('subject-list-status'),`${subjects.filter(s=>!s.archived).length} aktive Fächer`,'success'); } catch { status(id('subject-list-status'),'Fächer konnten nicht geladen werden.','error'); } }
+  async function archiveSubject(subject, restoring) { if(!restoring && !window.confirm('Fach archivieren?')) return; try { await request('/delete-subject',{id:subject.id,action:restoring?'restore':'archive'}); await loadCatalog(); } catch { status(id('subject-action-status'),'Änderung konnte nicht gespeichert werden.','error'); } }
+  async function deleteSubject(subject) { try { const preflight=await request('/delete-subject',{id:subject.id,action:'preflight'}); if(!preflight.deletable){ status(id('subject-action-status'),'Dieses Fach wird bereits verwendet und kann nicht endgültig gelöscht werden. Es kann archiviert werden.','error'); return; } if(!window.confirm('Fach endgültig löschen?')) return; await request('/delete-subject',{id:subject.id,action:'delete'}); await loadCatalog(); } catch { status(id('subject-action-status'),'Das Fach konnte nicht gelöscht werden.','error'); } }
+  let renameSubject=null; function openRename(subject){renameSubject=subject; id('rename-subject-name').value=subject.name; id('rename-modal-status').textContent=''; id('rename-modal').showModal(); id('rename-subject-name').focus();}
+  async function create(form){const name=id('modal-subject-name').value.trim(); if(!name)return; const [mode,assignmentGroup]=id('modal-subject-type').value.split(':'); id('subject-modal-submit').disabled=true; status(id('subject-modal-status'),'Wird gespeichert …'); try { await request('/add-subject-with-type',{name,mode,assignmentGroup:assignmentGroup||null}); form.reset(); id('subject-modal').close(); await loadCatalog(); } catch { status(id('subject-modal-status'),'Fach konnte nicht angelegt werden.','error'); } finally{id('subject-modal-submit').disabled=false;} }
+  function init(){ id('create-subject-button').addEventListener('click',()=>{id('subject-modal').showModal();id('modal-subject-name').focus();}); id('subject-modal-cancel').addEventListener('click',()=>id('subject-modal').close()); id('rename-modal-cancel').addEventListener('click',()=>id('rename-modal').close()); id('subject-modal-form').addEventListener('submit',e=>{e.preventDefault();create(e.currentTarget);}); id('rename-modal-form').addEventListener('submit',async e=>{e.preventDefault();if(!renameSubject)return; const old=renameSubject.name; const value=id('rename-subject-name').value.trim(); if(!value)return; id('rename-modal-submit').disabled=true; status(id('rename-modal-status'),'Wird gespeichert …'); try { const result=await request('/edit-subject',{id:renameSubject.id,name:value}); renameSubject.name=result?.name||value; id('rename-modal').close(); await loadCatalog(); } catch { renameSubject.name=old; status(id('rename-modal-status'),'Name konnte nicht geändert werden.','error'); } finally{id('rename-modal-submit').disabled=false;} }); loadCatalog(); }
+  document.addEventListener('DOMContentLoaded',init);
 })();

@@ -597,9 +597,14 @@ public class PostRequestHandler {
         });
         HttpHandler.registerPostRequestHandler("/delete-subject", AccessLevel.ADMIN, (rq) -> handleSafeDelete(rq, false));
         HttpHandler.registerPostRequestHandler("/delete-teacher", AccessLevel.ADMIN, (rq) -> handleSafeDelete(rq, true));
-        HttpHandler.registerPostRequestHandler("/edit-subject", AccessLevel.ADMIN, (rq) -> 
-            handleObjectAction(rq, new TypeToken<Subject>() {}, PostResponse.redirect("/manage_subjects", rq), (subject) -> subject.edit(prepare(rq.getString("name"))))
-        );
+        HttpHandler.registerPostRequestHandler("/edit-subject", AccessLevel.ADMIN, (rq) -> {
+            Subject subject = rq.getAPIObject(new TypeToken<Subject>() {});
+            subject.edit(prepare(rq.getString("name")));
+            try {
+                if (rq.getJson() != null) return PostResponse.json(Map.of("id", subject.getId(), "name", subject.getName()), rq);
+            } catch (JsonSyntaxException ignored) { }
+            return PostResponse.redirect("/manage_subjects", rq);
+        });
         HttpHandler.registerPostRequestHandler("/delete-class", AccessLevel.ADMIN, (rq) -> 
             handleObjectAction(rq, new TypeToken<SchoolClass>() {}, PostResponse.redirect("/manage_classes", rq), (schoolClass) -> schoolClass.delete())            
         );

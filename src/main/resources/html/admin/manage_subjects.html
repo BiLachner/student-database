@@ -1,52 +1,13 @@
 %[site;title=Fächer verwalten;content=!FOLLOWS]
 <section id="subjects" class="admin-shell admin-subject-management">
-    <header class="admin-page-header">
-        <p class="admin-eyebrow">Admin · Schuldaten</p>
-        <h1>Fächer</h1>
-        <p class="admin-page-intro">Fachname, Fachart und Bearbeitung bleiben in einer gemeinsamen, kanonischen Liste.</p>
-    </header>
-    %[admin_nav]
-    <main>
-        <section id="manage-subjects" class="admin-panel" aria-labelledby="add-subject-heading">
-            <h2 id="add-subject-heading">Fach hinzufügen</h2>
-            <p class="admin-panel-intro">Das Fach wird gemeinsam mit der gewählten Fachart angelegt. Die bestehende Verwaltung legt ohne aktiviertes JavaScript weiterhin ein gültiges REGULAR-Fach an.</p>
-            <form id="manage-subjects-form" class="admin-form admin-subject-create-form" method="post" action="/add-subject">
-                <div class="admin-form-field">
-                    <label for="subject-name">Fachname</label>
-                    <input type="text" id="subject-name" name="name" maxlength="200" required>
-                </div>
-                <div class="admin-form-field">
-                    <label for="create-subject-type">Fachart</label>
-                    <select id="create-subject-type" name="subjectType">
-                        <option value="REGULAR:">REGULAR · verbindlich für alle</option>
-                        <option value="INDIVIDUAL:WPF">WPF · individuell</option>
-                        <option value="INDIVIDUAL:RELIGION_ETHIK">Religion/Ethik · individuell</option>
-                    </select>
-                </div>
-                <button type="submit">Fach hinzufügen</button>
-            </form>
-            <p id="subject-management-status" class="admin-inline-status" role="status" aria-live="polite"></p>
-        </section>
-        <section id="subject-list" class="admin-panel" aria-labelledby="subject-list-heading">
-            <div class="admin-panel-heading">
-                <div>
-                    <h2 id="subject-list-heading">Fächerverwaltung</h2>
-                    <p class="admin-panel-intro">Jedes Fach erscheint genau einmal. Facharten und globale Klassenstufen werden getrennt gespeichert.</p>
-                </div>
-                <span id="subject-list-status" class="admin-inline-status" role="status" aria-live="polite">Fächer werden geladen …</span>
-            </div>
-            <div class="admin-table-scroll">
-                <table id="subjectList" class="admin-data-table">
-                    <caption class="admin-visually-hidden">Kanonische Fächerliste mit globaler Klassenstufen-Aktivierung</caption>
-                    <thead>
-                        <tr><th scope="col">Fach</th><th scope="col">Typ</th><th scope="col">Klasse 5</th><th scope="col">Klasse 6</th><th scope="col">Aktionen</th></tr>
-                    </thead>
-                    <tbody id="subject-list-body"></tbody>
-                </table>
-            </div>
-            <p class="admin-panel-note">Die Klassenstufen legen nur die schulweite Verfügbarkeit fest. Individuelle WPF-Zuordnungen bleiben in der Schüler- und Curriculumverwaltung.</p>
-        </section>
-    </main>
+<header class="admin-page-header"><h1>Fächer verwalten</h1><button id="create-subject-button" type="button">+ Fach anlegen</button></header>
+%[admin_nav]
+<main>
+<section id="subject-list" class="admin-panel"><div class="admin-panel-heading"><h2 class="admin-visually-hidden">Aktive Fächer</h2><span id="subject-list-status" class="admin-inline-status" role="status" aria-live="polite">Fächer werden geladen …</span></div>
+<div class="admin-table-scroll"><table id="subjectList" class="admin-data-table"><caption class="admin-visually-hidden">Fach, Typ, Klassenstufen und Aktionen</caption><thead><tr><th scope="col">Fach</th><th scope="col">Typ</th><th scope="col">Klasse 5</th><th scope="col">Klasse 6</th><th scope="col">Aktionen</th></tr></thead><tbody id="subject-list-body"></tbody></table></div></section>
+<details id="archived-subjects" class="admin-panel" hidden><summary>Archivierte Fächer anzeigen (<span id="archived-subject-count">0</span>)</summary><div class="admin-table-scroll"><table class="admin-data-table"><thead><tr><th scope="col">Fach</th><th scope="col">Typ</th><th scope="col">Aktionen</th></tr></thead><tbody id="archived-subject-list-body"></tbody></table></div></details>
+</main>
+<dialog id="subject-modal" class="admin-subject-modal"><form id="subject-modal-form" method="dialog"><h2>Fach anlegen</h2><label for="modal-subject-name">Name</label><input id="modal-subject-name" name="name" maxlength="200" required><label for="modal-subject-type">Typ</label><select id="modal-subject-type" name="subjectType"><option value="REGULAR:">Reguläres Fach</option><option value="INDIVIDUAL:RELIGION_ETHIK">Religion/Ethik</option><option value="INDIVIDUAL:WPF">WPF</option></select><p id="subject-modal-status" class="admin-inline-status" role="status" aria-live="polite"></p><div class="admin-dialog-actions"><button id="subject-modal-cancel" type="button">Abbrechen</button><button id="subject-modal-submit" type="submit">Anlegen</button></div></form></dialog>
+<dialog id="rename-modal" class="admin-subject-modal"><form id="rename-modal-form" method="dialog"><h2>Fach umbenennen</h2><label for="rename-subject-name">Name</label><input id="rename-subject-name" name="name" maxlength="200" required><p id="rename-modal-status" class="admin-inline-status" role="status" aria-live="polite"></p><div class="admin-dialog-actions"><button id="rename-modal-cancel" type="button">Abbrechen</button><button id="rename-modal-submit" type="submit">Name ändern</button></div></form></dialog><div id="subject-action-status" class="admin-inline-status" role="status" aria-live="polite"></div>
 </section>
-<script src="/admin-subject-management.js" defer></script>
-<script src="/admin-section-navigation.js" defer></script>
+<script src="/admin-subject-management.js" defer></script><script src="/admin-section-navigation.js" defer></script>

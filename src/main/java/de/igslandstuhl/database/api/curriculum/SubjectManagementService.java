@@ -22,8 +22,10 @@ public final class SubjectManagementService {
         return curriculum.transaction(c -> {
             List<Map<String, Object>> result = new ArrayList<>();
             for (Map<String, Object> row : Curriculum.rows(c,
-                    "SELECT s.id,s.name,s.subject_code,t.mode,t.assignment_group,t.wpf "
-                    + "FROM subjects s LEFT JOIN curriculum_subject_types t ON t.subject=s.id ORDER BY s.id")) {
+                    "SELECT s.id,s.name,s.subject_code,t.mode,t.assignment_group,t.wpf, "
+                    + "CASE WHEN a.subject IS NULL THEN 0 ELSE 1 END AS archived "
+                    + "FROM subjects s LEFT JOIN curriculum_subject_types t ON t.subject=s.id "
+                    + "LEFT JOIN archived_subjects a ON a.subject=s.id ORDER BY s.id")) {
                 int subject = Curriculum.integer(row, "id");
                 Map<String, Object> entry = new LinkedHashMap<>();
                 entry.put("id", subject);
@@ -32,6 +34,7 @@ public final class SubjectManagementService {
                 entry.put("mode", row.get("mode") == null ? "UNSPECIFIED" : String.valueOf(row.get("mode")));
                 entry.put("assignmentGroup", row.get("assignment_group"));
                 entry.put("wpf", isWpf(row));
+                entry.put("archived", Curriculum.integer(row, "archived") != 0);
                 entry.put("activeGrades", SubjectGradeActivationRepository.activeGrades(c, subject));
                 result.add(entry);
             }
