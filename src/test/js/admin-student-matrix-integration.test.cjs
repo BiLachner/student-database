@@ -78,6 +78,33 @@ test('Grade 6 renders both individual subject groups',async()=>{
   } finally { dom.window.close(); }
 });
 
+test('Grade 6 keeps all individual subject columns readable on desktop and mobile',async()=>{
+  const subjects=[
+    {id:11,name:'Reli01',assignmentGroup:'RELIGION_ETHIK'},
+    {id:12,name:'Ethik01',assignmentGroup:'RELIGION_ETHIK'},
+    {id:21,name:'WPF Französisch',assignmentGroup:'WPF'},
+    {id:22,name:'WPF Ökologie',assignmentGroup:'WPF'},
+    {id:23,name:'WPF Technologie und Wirtschaft',assignmentGroup:'WPF'},
+    {id:24,name:'WPF Soziales und Familie',assignmentGroup:'WPF'},
+    {id:25,name:'WPF Sport und Gesundheit',assignmentGroup:'WPF'},
+    {id:26,name:'WPF Darstellendes Spiel',assignmentGroup:'WPF'}
+  ];
+  const {dom}=await load({withCurriculum:false,subjects6:subjects});
+  try {
+    const root=dom.window.document.querySelector('#admin-student-individual-matrix');
+    const grade=root.querySelector('select[aria-label="Jahrgang"]'); grade.value='6'; grade.dispatchEvent(new dom.window.Event('change'));
+    await tick();
+    const table=root.querySelector('.student-individual-matrix-table');
+    assert.equal(table.querySelectorAll('.student-matrix-subject-column').length,8);
+    assert.equal(table.querySelector('.student-matrix-name-column').className,'student-matrix-name-column');
+    assert.equal(table.querySelector('.student-matrix-status-column').className,'student-matrix-status-column');
+    for (const label of ['Rel1','Eth1','F','Öko','TuW','HuS','SuG','DS']) assert.ok(table.textContent.includes(label),label);
+    assert.equal(table.querySelectorAll('.student-matrix-choice').length,8);
+    assert.equal(root.querySelectorAll('.student-matrix-card').length,1);
+    assert.equal(root.querySelectorAll('.student-matrix-card .student-matrix-group').length,2);
+  } finally { dom.window.close(); }
+});
+
 test('empty individual subjects and empty class keep the B6 section visible',async()=>{
   let env=await load({withCurriculum:false,subjects5:[],subjects6:[]});
   try { assert.match(env.dom.window.document.querySelector('#admin-student-individual-matrix').textContent,/keine individuellen Fächer aktiviert/); }
