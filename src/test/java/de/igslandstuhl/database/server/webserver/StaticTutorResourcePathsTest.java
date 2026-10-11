@@ -73,6 +73,20 @@ class StaticTutorResourcePathsTest {
         }
     }
 
+    @Test
+    void subjectManagementApisHaveRegisteredPostHandlers() {
+        for (String path : new String[]{
+                "/subject-management-catalog", "/set-subject-grade-activations",
+                "/set-curriculum-subject-type", "/add-subject-with-type",
+                "/edit-subject", "/delete-subject"}) {
+            WebPath webPath = Registry.webPathRegistry().get(WebPath.PathInfo.get(path, RequestType.POST));
+            assertNotNull(webPath, path + " must be registered");
+            assertEquals(RequestType.POST, webPath.type());
+            assertEquals("PostRequestHandler", webPath.handlerType());
+            assertNotNull(Registry.postRequestHandlerRegistry().get(path), path + " handler must be registered");
+        }
+    }
+
     private static void assertPath(String path, String namespace, AccessLevel accessLevel,
             String expectedResourceNamespace, String expectedResourceName) {
         WebPath webPath = Registry.webPathRegistry().get(WebPath.PathInfo.get(path, RequestType.GET));
