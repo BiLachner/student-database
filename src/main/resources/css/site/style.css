@@ -170,13 +170,13 @@ table tr:last-child td {
 .semester-landing { display:block; margin:1rem 0; }
 .semester-create-panel, .semester-manage-panel { min-height:12rem; padding:1.2rem; background:#fff; border:1px solid #d9e1ea; border-radius:.7rem; box-shadow:0 2px 8px #172b4d12; }
 .semester-manage-panel { display:flex; flex-direction:column; gap:1rem; }
-.curriculum-wpf-table { width:100%; border-collapse:collapse; margin-top:1rem; background:#fff; }
-.curriculum-wpf-table th, .curriculum-wpf-table td { padding:.65rem .8rem; border-bottom:1px solid #d9e1ea; text-align:left; vertical-align:middle; }
-.curriculum-wpf-table th { background:#edf4f9; color:#17324d; font-weight:700; }
-.curriculum-wpf-table th.sortable { cursor:pointer; text-decoration:underline; }
-.curriculum-wpf-table th.sortable:hover { background:#dbeaf3; }
-.curriculum-wpf-table tr:nth-child(even) { background:#f8fbfd; }
-.curriculum-wpf-table select { min-width:12rem; }
+.curriculum-mapping-table { width:100%; border-collapse:collapse; margin-top:1rem; background:#fff; }
+.curriculum-mapping-table th, .curriculum-mapping-table td { padding:.65rem .8rem; border-bottom:1px solid #d9e1ea; text-align:left; vertical-align:middle; }
+.curriculum-mapping-table th { background:#edf4f9; color:#17324d; font-weight:700; }
+.curriculum-mapping-table th.sortable { cursor:pointer; text-decoration:underline; }
+.curriculum-mapping-table th.sortable:hover { background:#dbeaf3; }
+.curriculum-mapping-table tr:nth-child(even) { background:#f8fbfd; }
+.curriculum-mapping-table select { min-width:12rem; }
 @media (max-width:700px) { .semester-landing { grid-template-columns:minmax(0, 1fr); } }
 .admin-menu-links { display:grid; gap:.35rem; padding:0 .8rem .8rem; }
 .admin-menu-links a { display:block; padding:.45rem .55rem; border-radius:.4rem; color:#24527a; text-decoration:none; }
@@ -297,7 +297,6 @@ body:has(.admin-shell) > header { display:none; }
 .admin-shell .admin-regular-assignments table,
 .admin-shell .admin-course-group-summary table,
 .admin-shell .admin-individual-teachers table,
-.admin-shell .curriculum-wpf-board table { display:block; max-width:100%; overflow-x:auto; border-collapse:collapse; }
 .admin-shell .admin-course-group-summary,
 .admin-shell .admin-individual-teachers { min-width:0; max-width:100%; box-sizing:border-box; overflow-x:auto; }
 .admin-shell .admin-course-group-summary table,
@@ -310,7 +309,6 @@ body:has(.admin-shell) > header { display:none; }
 .admin-shell .admin-individual-teachers td { padding:.6rem; border-bottom:1px solid var(--admin-border); text-align:left; }
 .admin-shell .admin-tutor-table select,
 .admin-shell .admin-individual-teachers select,
-.admin-shell .curriculum-wpf-board select { min-width:min(14rem, 70vw); }
 .admin-semester-controls { display:flex; align-items:end; gap:.75rem; max-width:52rem; }
 .admin-semester-controls select { flex:1 1 16rem; }
 .admin-grade-context { max-width:16rem; margin:.75rem 0 1rem; }

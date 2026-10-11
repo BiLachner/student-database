@@ -57,10 +57,10 @@ das global konfigurierte aktuelle Halbjahr.
   classId/subjectId/teacherId werden additiv gespeichert bzw. aktualisiert,
   leere Kombinationen bleiben unverändert. Vorhandene Zuordnungen werden im
   UI semesterbezogen wieder angezeigt.
-- /curriculum-wpf-roster: Admin; classId, semesterId. Minimaler Schülername,
-  ID, aktuelle WPF- und Lehrer-ID; keine Zugangsdaten.
-- /assign-curriculum-wpf: Admin; studentId, subjectId, classId, teacherId,
-  semesterId, expectedSubjectId (bei Erstzuordnung null).
+- /curriculum-individual-student-matrix: Admin; semesterId, grade, classId. Kanonisches
+  Lesemodell für alle individuellen Schülerzuordnungen.
+- /assign-curriculum-individual-subject: Admin; semesterId, studentId, classId,
+  grade, assignmentGroup, subjectId und expectedSubjectId.
 - /curriculum-releases: Lehrkraft/Admin; Standard-Kontextfelder.
 - /set-curriculum-release: Lehrkraft/Admin; Kontext, active (Boolean) und genau
   eines von topicId oder taskId.

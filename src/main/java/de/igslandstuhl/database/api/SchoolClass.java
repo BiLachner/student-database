@@ -107,7 +107,7 @@ public class SchoolClass implements APIObject {
         Server.getInstance().processRequest((fields) -> {
             Subject subject = Subject.fromSQLFields(fields);
             subjects.add(subject);
-        }, "get_subjects_by_grade", Subject.SQL_FIELDS, String.valueOf(grade));
+        }, "get_active_subjects_by_grade", Subject.SQL_FIELDS, String.valueOf(grade));
     }
     /**
      * Checks if subjects have already been fetched; if not, fetches them.
@@ -135,19 +135,6 @@ public class SchoolClass implements APIObject {
             throw new IllegalStateException("Could not fetch subjects", e);
         }
         return subjects;
-    }
-
-    /**
-     * Adds a subject to the grade and the list of subjects for this class if it is not already present.
-     *
-     * @param subject the subject to add
-     * @throws SQLException if there is an error accessing the database
-     */
-    public void addSubject(Subject subject) throws SQLException {
-        if (subject != null && !subjects.contains(subject)) {
-            subject.addToGrade(grade);
-            subjects.add(subject);
-        }
     }
 
     /**

@@ -85,6 +85,7 @@ public class SQLiteConnection implements AutoCloseable, PreparedStatementSupplie
             for (var resource:Server.getInstance().getResourceManager().getResources(migrations)) {
                 if (legacyComplete && resource.resource().matches("0(?:0[1-9]|1[0-9]|20)_.*\\.sql")) continue;
                 if (resource.resource().startsWith("027_") && !hasTable("subjects")) continue;
+                if (resource.resource().startsWith("028_") && !hasTable("subjects")) continue;
                 Connection connection=getSQLConnection();
                 boolean autoCommit=connection.getAutoCommit();
                 connection.setAutoCommit(false);
@@ -96,10 +97,11 @@ public class SQLiteConnection implements AutoCloseable, PreparedStatementSupplie
                             try {
                                 supplier.executeUpdate(statement);
                             } catch (SQLException e) {
+                                boolean cleanupMigration = resource.resource().startsWith("028_");
                                 if (e.getMessage() != null && (
                                         e.getMessage().toLowerCase().contains("duplicate column name")
                                         || e.getMessage().toLowerCase().contains("no such column")
-                                        || e.getMessage().toLowerCase().contains("no such table")
+                                        || (!cleanupMigration && e.getMessage().toLowerCase().contains("no such table"))
                                         || e.getMessage().toLowerCase().contains("already exists")
                                     )) {
                                     LOGGER.debug("Skipping already applied migration statement: {}", statement);

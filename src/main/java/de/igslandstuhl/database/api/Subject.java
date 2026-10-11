@@ -210,24 +210,6 @@ public class Subject implements APIObject {
             .collect(Collectors.toList());
     }
     
-    /**
-     * Adds the subject to a specific grade.
-     * This method associates the subject with a grade in the database.
-     *
-     * @param grade the grade to associate the subject with
-     * @throws SQLException if there is an error accessing the database
-     */
-    public void addToGrade(int grade) throws SQLException {
-        Server.getInstance().getConnection().executeVoidProcessSecure(
-            SQLHelper.getAddObjectProcess("subject_to_grade", String.valueOf(grade), String.valueOf(id))
-        );
-    }
-    public void removeFromGrade(int grade) throws SQLException {
-        Server.getInstance().getConnection().executeVoidProcessSecure(
-            SQLHelper.getDeleteObjectProcess("subject_from_grade", String.valueOf(grade), String.valueOf(id))
-        );
-    }
-
     @Override
     public String toString() {
         return "{\"id\": " + id + ", \"name\": \"" + name + "\"}";
@@ -279,7 +261,7 @@ public class Subject implements APIObject {
             fields -> {
                 grades.add(Integer.parseInt(fields[0]));
             },
-            "get_grades_by_subject",
+            "get_active_grades_by_subject",
             new String[] {"grade"}, 
             String.valueOf(id));
         } catch (SQLException e) {

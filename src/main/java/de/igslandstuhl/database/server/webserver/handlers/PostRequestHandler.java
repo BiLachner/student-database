@@ -206,6 +206,12 @@ public class PostRequestHandler {
             return PostResponse.badRequest("Ungültige Schüler-ID.", request);
         }
     }
+    private static PostResponse handleCurriculumStudentSubjects(APIPostRequest request) {
+        Student student = request.getCurrentStudent();
+        if (student == null) return PostResponse.ok("[]", ContentType.JSON, request);
+        return PostResponse.ok(JSONUtils.toJSON(student.getSubjects(), (subject, builder) ->
+                builder.addProperty("id", subject.getId()).addProperty("name", subject.getName())), ContentType.JSON, request);
+    }
     private static PostResponse handleTeacherGetData(APIPostRequest request) {
         String path = request.getPath().replace("teacher-", "my");
         Teacher teacher = request.getCurrentTeacher();
@@ -527,7 +533,7 @@ public class PostRequestHandler {
         HttpHandler.registerPostRequestHandler("/reopen-task", AccessLevel.USER, (rq) -> handleTaskChange(rq, Task.STATUS_NOT_STARTED));
         HttpHandler.registerPostRequestHandler("/lock-task", AccessLevel.USER, (rq) -> handleTaskChange(rq, Task.STATUS_LOCKED));
         HttpHandler.registerPostRequestHandler("/student-data", AccessLevel.TEACHER, PostRequestHandler::handleStudentGetData);
-        HttpHandler.registerPostRequestHandler("/student-subjects", AccessLevel.TEACHER, PostRequestHandler::handleStudentGetData);
+        HttpHandler.registerPostRequestHandler("/curriculum-student-subjects", AccessLevel.TEACHER, PostRequestHandler::handleCurriculumStudentSubjects);
         HttpHandler.registerPostRequestHandler("/admin-student-data", AccessLevel.ADMIN, PostRequestHandler::handleAdminStudentGetData);
         HttpHandler.registerPostRequestHandler("/teacher-classes", AccessLevel.ADMIN, PostRequestHandler::handleTeacherGetData);
         HttpHandler.registerPostRequestHandler("/teacher-subjects", AccessLevel.ADMIN, PostRequestHandler::handleTeacherGetData);
@@ -559,9 +565,6 @@ public class PostRequestHandler {
                 }),
                 ContentType.JSON, rq
             );
-        });
-        HttpHandler.registerPostRequestHandler("/grade-list", AccessLevel.PUBLIC, (rq) -> {
-            return PostResponse.ok(JSONUtils.toJSON(rq.getSubject().getGrades()), ContentType.JSON, rq);
         });
         HttpHandler.registerPostRequestHandler("/topic-list", AccessLevel.STUDENT, (rq) -> {
             var topics=rq.getSubject().getTopics(rq.getInt("grade"));
@@ -616,15 +619,6 @@ public class PostRequestHandler {
         HttpHandler.registerPostRequestHandler("/edit-student-profile", AccessLevel.ADMIN, PostRequestHandler::handleEditStudentProfile);
         HttpHandler.registerPostRequestHandler("/edit-teacher-profile", AccessLevel.ADMIN, PostRequestHandler::handleEditTeacherProfile);
         HttpHandler.registerPostRequestHandler("/admin-reset-password", AccessLevel.ADMIN, PostRequestHandler::handleAdminResetPassword);
-        HttpHandler.registerPostRequestHandler("/add-subject-to-class", AccessLevel.ADMIN, (rq) -> 
-            handleObjectAction(rq, new TypeToken<SchoolClass>() {}, PostResponse.redirect("/class", rq), (schoolClass) -> schoolClass.addSubject(rq.getSubject()))
-        );
-        HttpHandler.registerPostRequestHandler("/add-grade-to-subject", AccessLevel.ADMIN, (rq) -> 
-            handleObjectAction(rq, new TypeToken<Subject>() {}, PostResponse.redirect("/subject", rq), (subject) -> subject.addToGrade(rq.getInt("grade")))
-        );
-        HttpHandler.registerPostRequestHandler("/delete-grade-from-subject", AccessLevel.ADMIN, (rq) -> 
-            handleObjectAction(rq, new TypeToken<Subject>() {}, PostResponse.redirect("/subject", rq), (subject) -> subject.removeFromGrade(rq.getInt("grade")))
-        );
         HttpHandler.registerPostRequestHandler("/delete-topics", AccessLevel.ADMIN, (rq) -> 
             handleObjectAction(rq, new TypeToken<Subject>() {}, PostResponse.redirect("/subject", rq), (subject) -> subject.getTopics(rq.getInt("grade")).forEach((topic) -> {
                 try {

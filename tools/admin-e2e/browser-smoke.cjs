@@ -199,9 +199,9 @@ async function main() {
     out.crossClassCourseGroup = true;
     out.religionEthikCrossClass = true;
     const groupIdBeforeTeacherChange = group.json[0].id;
-    const blockedHistoricalSwitch = await post('/assign-curriculum-wpf', {
+    const blockedHistoricalSwitch = await post('/assign-curriculum-individual-subject', {
       studentId: data.studentAId, subjectId: data.alternativeWpfSubjectId, classId: data.classAId,
-      semesterId: data.semester1Id, assignmentGroup: 'WPF', expectedSubjectId: data.wpfSubjectId
+      grade: 6, semesterId: data.semester1Id, assignmentGroup: 'WPF', expectedSubjectId: data.wpfSubjectId
     });
     expect(blockedHistoricalSwitch.status === 409, `completed-work subject switch HTTP ${blockedHistoricalSwitch.status}`);
     out.completedHistorySwitchBlocked = true;
@@ -298,14 +298,14 @@ async function main() {
       'REGULAR teacher change mutated releases, membership, contexts, or learning history');
     out.regularTeacherChange = true;
     out.regularTeacherChangePreservedHistoryAndReleases = true;
-    const concurrencySuccess = await post('/assign-curriculum-wpf', {
+    const concurrencySuccess = await post('/assign-curriculum-individual-subject', {
       studentId: data.studentBId, subjectId: data.alternativeWpfSubjectId, classId: data.classDId,
-      semesterId: data.semester1Id, assignmentGroup: 'WPF', expectedSubjectId: data.wpfSubjectId
+      grade: 6, semesterId: data.semester1Id, assignmentGroup: 'WPF', expectedSubjectId: data.wpfSubjectId
     });
     expect(concurrencySuccess.status === 200, `expectedSubjectId valid switch HTTP ${concurrencySuccess.status}`);
-    const concurrencyConflict = await post('/assign-curriculum-wpf', {
+    const concurrencyConflict = await post('/assign-curriculum-individual-subject', {
       studentId: data.studentBId, subjectId: data.wpfSubjectId, classId: data.classDId,
-      semesterId: data.semester1Id, assignmentGroup: 'WPF', expectedSubjectId: data.wpfSubjectId
+      grade: 6, semesterId: data.semester1Id, assignmentGroup: 'WPF', expectedSubjectId: data.wpfSubjectId
     });
     expect(concurrencyConflict.status === 409, `stale expectedSubjectId HTTP ${concurrencyConflict.status}`);
     out.optimisticConcurrency = true;
@@ -315,7 +315,7 @@ async function main() {
 
   const authPaths = [
     '/delete-subject', '/delete-teacher', '/create-curriculum-semester', '/activate-curriculum-semester',
-    '/assign-class-tutors', '/assign-grade-curriculum', '/assign-individual-grade-teacher', '/assign-curriculum-wpf'
+    '/assign-class-tutors', '/assign-grade-curriculum', '/assign-individual-grade-teacher', '/assign-curriculum-individual-subject'
   ];
   for (const [role, username, password] of [
     ['teacher', fixture.teacherAUsername, fixture.teacherAPassword],

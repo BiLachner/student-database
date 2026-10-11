@@ -4,7 +4,6 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -449,54 +448,17 @@ public class Student extends User {
      */
     public SchoolClass getSchoolClass() { return schoolClass; }
 
-    /**
-     * Returns the subjects explicitly assigned to this student in addition to
-     * the standard subjects of the student's grade.
-     *
-     * @return the student's individual additional subjects
-     */
-    public List<Subject> getIndividualSubjects() {
-        List<Subject> individualSubjects = new ArrayList<>();
-        try {
-            Server.getInstance().processRequest(
-                fields -> individualSubjects.add(Subject.fromSQLFields(fields)),
-                "get_subjects_by_student",
-                Subject.SQL_FIELDS,
-                String.valueOf(id)
-            );
-        } catch (SQLException e) {
-            throw new IllegalStateException("Could not fetch individual subjects", e);
-        }
-        return individualSubjects;
-    }
-
-    /**
-     * Returns the effective subjects of this student: the standard subjects of
-     * the student's grade plus individually assigned subjects, deduplicated by
-     * subject ID.
-     *
-     * @return the student's effective subjects
-     */
+    /** Returns the student's subjects from the active semester's canonical curriculum context. */
     public List<Subject> getSubjects() {
-        Map<Integer, Subject> effectiveSubjects = new LinkedHashMap<>();
-        if (schoolClass != null) {
-            schoolClass.getSubjects().forEach(subject -> effectiveSubjects.put(subject.getId(), subject));
-        }
-        getIndividualSubjects().forEach(subject -> effectiveSubjects.putIfAbsent(subject.getId(), subject));
         SchoolYear year=SchoolYear.getCurrentYear(false);
         Semester semester=year==null?null:year.getCurrentSemester();
-        if(semester!=null) {
-            try {
-                var enrollment=new de.igslandstuhl.database.api.curriculum.CurriculumEnrollment(de.igslandstuhl.database.api.curriculum.Curriculum.current());
-                var assigned=enrollment.studentSubjects(id,semester.getId());
-                if(assigned!=null)effectiveSubjects.clear();
-                else for(int subjectId:enrollment.unselectedWpf(id,semester.getId()))effectiveSubjects.remove(subjectId);
-                for(int subjectId:assigned!=null?assigned:enrollment.selectedWpf(id,semester.getId())) {
-                    Subject subject=Subject.get(subjectId);if(subject!=null)effectiveSubjects.put(subjectId,subject);
-                }
-            } catch(SQLException e) {throw new IllegalStateException("Could not resolve semester subjects",e);}
-        }
-        return new ArrayList<>(effectiveSubjects.values());
+        if(semester==null) return List.of();
+        try {
+            var enrollment=new de.igslandstuhl.database.api.curriculum.CurriculumEnrollment(de.igslandstuhl.database.api.curriculum.Curriculum.current());
+            var assigned=enrollment.studentSubjects(id,semester.getId());
+            if(assigned==null) return List.of();
+            return assigned.stream().map(Subject::get).filter(java.util.Objects::nonNull).toList();
+        } catch(SQLException e) {throw new IllegalStateException("Could not resolve semester subjects",e);}
     }
 
     /**
@@ -507,34 +469,6 @@ public class Student extends User {
      */
     public boolean hasSubject(Subject subject) {
         return subject != null && getSubjects().stream().anyMatch(candidate -> candidate.getId() == subject.getId());
-    }
-
-    /**
-     * Adds an individual subject assignment for this student. Repeated calls
-     * with the same subject are idempotent.
-     *
-     * @param subject the additional subject to assign
-     * @throws SQLException if the assignment cannot be stored
-     */
-    public void addSubject(Subject subject) throws SQLException {
-        if (subject == null) throw new IllegalArgumentException("Subject cannot be null");
-        Server.getInstance().getConnection().executeVoidProcessSecure(
-            SQLHelper.getAddObjectProcess("subject_to_student", String.valueOf(id), String.valueOf(subject.getId()))
-        );
-    }
-
-    /**
-     * Removes only an individual subject assignment. A standard grade subject
-     * remains part of the student's effective subjects.
-     *
-     * @param subject the individual subject to remove
-     * @throws SQLException if the assignment cannot be removed
-     */
-    public void removeSubject(Subject subject) throws SQLException {
-        if (subject == null) throw new IllegalArgumentException("Subject cannot be null");
-        Server.getInstance().getConnection().executeVoidProcessSecure(
-            SQLHelper.getDeleteObjectProcess("subject_from_student", String.valueOf(id), String.valueOf(subject.getId()))
-        );
     }
 
     /**
@@ -786,10 +720,18 @@ public class Student extends User {
     }
 
     public void delete() throws SQLException {
-        Server.getInstance().getConnection().executeVoidProcessSecure(
-            SQLHelper.getDeleteObjectProcess("subjects_from_student", String.valueOf(id))
-        );
-        Server.getInstance().getConnection().executeVoidProcessSecure(SQLHelper.getDeleteObjectProcess("student", String.valueOf(id)));
+        Server.getInstance().getConnection().writeTransaction(c -> {
+            for (String table : List.of("course_group_members", "student_curriculum_contexts",
+                    "curriculum_individual_assignments", "curriculum_enrolled_students")) {
+                try (var statement = c.createStatement()) {
+                    statement.executeUpdate("DELETE FROM " + table + " WHERE student=" + id);
+                } catch (SQLException ignored) { }
+            }
+            try (var statement = c.prepareStatement("DELETE FROM students WHERE id=?")) {
+                statement.setInt(1, id); statement.executeUpdate();
+            }
+            return null;
+        });
         students.remove(id);
     }
 

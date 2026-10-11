@@ -418,22 +418,6 @@ public final class CurriculumEnrollment {
             return Map.of("students",students,"assignments",assignments,"classes",mappings.size());
         });
     }
-    public List<Map<String,Object>> wpfRoster(Actor actor,int classId,int semester) throws SQLException {
-        return individualRoster(actor,classId,semester,"WPF");
-    }
-    public List<Map<String,Object>> individualRoster(Actor actor,int classId,int semester,String assignmentGroup) throws SQLException {
-        admin(actor);
-        String finalGroup=assignmentGroup==null?"WPF":assignmentGroup.strip().toUpperCase(Locale.ROOT);
-        return curriculum.transaction(c->{require(c,"SELECT id FROM classes WHERE id=? AND active=1 AND id<>0",classId);require(c,"SELECT id FROM semesters WHERE id=?",semester);
-            int grade=integer(require(c,"SELECT grade FROM classes WHERE id=?",classId),"grade");
-            List<Map<String,Object>> result=rows(c,"SELECT s.id,s.first_name,s.last_name,w.subject AS subjectId FROM students s LEFT JOIN curriculum_individual_assignments w ON w.student=s.id AND w.semester=? AND w.assignment_group=? WHERE s.class=? ORDER BY s.last_name,s.first_name,s.id",semester,finalGroup,classId);
-            for (Map<String,Object> row : result) {
-                Object subjectId=row.get("subjectId");
-                row.put("subjectGloballyAvailable", subjectId != null && SolSubjectPolicy.isAllowed(c, grade, integer(row,"subjectId")));
-            }
-            return result;
-        });
-    }
 
     /** Compact, class-scoped read model for the student individual-subject matrix. */
     public Map<String,Object> individualStudentMatrix(Actor actor,int semester,int grade,int classId) throws SQLException {
@@ -470,9 +454,6 @@ public final class CurriculumEnrollment {
             result.put("classLabel",schoolClass.get("label")); result.put("subjects",subjects); result.put("students",students);
             return result;
         });
-    }
-    public void assignWpf(Actor actor,int student,Scope scope,Integer expectedSubject) throws SQLException {
-        assignIndividual(actor,student,scope.subjectId(),scope.classId(),scope.semesterId(),"WPF",expectedSubject);
     }
     public void assignIndividual(Actor actor,int student,int subject,int classId,int semester,String assignmentGroup,Integer expectedSubject) throws SQLException {
         admin(actor);
@@ -547,10 +528,6 @@ public final class CurriculumEnrollment {
             result.put("studentId",student); result.put("semesterId",semester); result.put("assignmentGroup",finalGroup); result.put("subjectId",subject);
             return result;
         });
-    }
-    /* Compatibility overload: the teacher in the old scope is ignored. */
-    public void assignIndividual(Actor actor,int student,Scope scope,String assignmentGroup,Integer expectedSubject) throws SQLException {
-        assignIndividual(actor,student,scope.subjectId(),scope.classId(),scope.semesterId(),assignmentGroup,expectedSubject);
     }
     static void requireSelectedWpf(Connection c,int student,int subject,int semester) throws SQLException {
         if(Curriculum.individualSubject(c,subject)) {

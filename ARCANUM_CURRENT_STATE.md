@@ -143,3 +143,15 @@ The tutor feature does not change coin calculation, stage completion, level hand
 - The runner safety checks passed and one synthetic DEMO run was removed completely. DEMO integrity remained `ok` and FK baseline `756`.
 - The DEMO runtime was corrected to the already approved student JAR SHA `6edb2f568a1ed34370e38d0787924c8ee9bc9ea51b6284f377f2fa8b251e4844`; PROD was not changed.
 - The synthetic login path passed for all four teacher roles. The weekly overview loaded, but the deployed mutation returned `403` for Tutor 1 despite the verified tutor assignment and matching semester. Full graduation E2E therefore remains outstanding; this status is not a final acceptance.
+## B8 Legacy subject-assignment cleanup
+
+Migration 028 removes `gradesubjects`, `student_subjects`, and
+`curriculum_wpf_assignments` after the canonical curriculum schema is present.
+This is an explicit product decision: no legacy backfill or manual
+reconciliation is performed. Subject participation is configured only through
+`subject_grade_activation` and `SolSubjectPolicy`; student individual
+assignments use the semester-scoped curriculum individual matrix.
+
+Migration 028 is destructive. The first deployment requires a pre-migration
+database snapshot. Rolling back to a release before 028 requires restoring the
+matching pre-028 database snapshot; switching only the old JAR is insufficient.

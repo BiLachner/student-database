@@ -103,7 +103,7 @@ async function fetchMyCurriculumCatalog(subjectId) {
     });
 }
 async function fetchStudentSubjects(studentId) {
-    const subjects = await getJsonWithPost('/student-subjects', { studentId });
+    const subjects = await getJsonWithPost('/curriculum-student-subjects', { studentId });
     return subjects;
 }
 async function fetchAllSubjects() {
@@ -377,17 +377,6 @@ async function populateTopicSelect(topicSelect, subjectId, grade, currentTopic) 
       topicSelect.appendChild(option);
     });
 }
-async function populateGradeSelect(gradeSelectId, subjectId) {
-    const gradeSelect = document.getElementById(gradeSelectId);
-    gradeSelect.replaceChildren();
-    const grades = await getJsonWithPost('/grade-list', { subjectId });
-    grades.forEach(grade => {
-        const option = document.createElement('option');
-        option.text = grade;
-        option.value = grade;
-        gradeSelect.appendChild(option)
-    })
-}
 async function populateSubjectList(subjectListId, classId) {
     const subjectList = document.getElementById(subjectListId);
     const subjects = await fetchJson("/class-subjects", {
@@ -402,26 +391,6 @@ async function populateSubjectList(subjectListId, classId) {
         const listItem = document.createElement('li');
         listItem.textContent = subject.name;
         subjectList.appendChild(listItem);
-    });
-}
-async function populateGradeList(listId, subjectId) {
-    const list = document.getElementById(listId);
-    list.replaceChildren();
-    const grades = await getJsonWithPost('/grade-list', { subjectId });
-    grades.forEach(grade => {
-        const li = document.createElement("li");
-        li.textContent = grade;
-        li.style.cursor = 'pointer';
-        li.title = 'Klicken, um die Klasenstufe zu entfernen';
-        li.addEventListener('click', (e) => {
-            if (confirm('Soll die Klassenstufe wirklich von diesem Fach entfernt werden?')) {
-                openUrlWithPostParams('/delete-grade-from-subject', {
-                    "subject": subjectId,
-                    "grade": grade
-                })
-            }
-        })
-        list.appendChild(li)
     });
 }
 async function postDataAndDownload(url, data, filename) {

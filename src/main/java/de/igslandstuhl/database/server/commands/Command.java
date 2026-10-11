@@ -89,22 +89,6 @@ public interface Command {
         registerCommand("list-classes", (args) -> {
             return SchoolClass.getAll().stream().map(SchoolClass::getLabel).reduce("Classes:", (s1,s2) -> s1 + "\n" + s2);
         }, new CommandDescription("list-classes", "Lists all classes", "list-classes"));
-        registerCommand("add-subject-to-class", (args) -> {
-            if (args.length != 2) return "Usage: add-subject-to-class [subject] [class]";
-
-            Subject subject = Subject.get(args[0]);
-            SchoolClass schoolClass = SchoolClass.get(args[1]);
-
-            if (subject == null) return "Subject not found";
-            if (schoolClass == null) return "Class not found";
-
-            try {
-                schoolClass.addSubject(subject);
-            } catch (SQLException e) {
-                throw new IllegalStateException(e);
-            }
-            return "Successfully added subject to class";
-        }, new CommandDescription("add-subject-to-class", "Adds a subject to a class", "add-subject-to-class [subject] [class]"));
         registerCommand(("set-class-label"), (args) -> {
             if (args.length != 2) return "Usage: set-class-label [old] [new]";
 
