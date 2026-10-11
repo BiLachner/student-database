@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.util.Map;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -47,15 +48,27 @@ class StaticTutorResourcePathsTest {
     }
 
     @Test
-    void individualAssignmentApisAreRegisteredAsAdminPostHandlers() {
-        for (String path : new String[]{
-                "/curriculum-individual-student-matrix",
-                "/assign-curriculum-individual-subject"}) {
+    void enrollmentApisAreRegisteredAsPostHandlersWithCoreAccessLevels() {
+        Map<String, AccessLevel> expectedAccess = Map.ofEntries(
+                Map.entry("/curriculum-enrollment-catalog", AccessLevel.ADMIN),
+                Map.entry("/curriculum-course-groups", AccessLevel.ADMIN),
+                Map.entry("/curriculum-tutor-assignments", AccessLevel.USER),
+                Map.entry("/assign-class-tutors", AccessLevel.USER),
+                Map.entry("/assign-class-subject-teacher", AccessLevel.ADMIN),
+                Map.entry("/assign-individual-grade-teacher", AccessLevel.ADMIN),
+                Map.entry("/assign-grade-curriculum", AccessLevel.ADMIN),
+                Map.entry("/create-curriculum-semester", AccessLevel.USER),
+                Map.entry("/activate-curriculum-semester", AccessLevel.USER),
+                Map.entry("/remove-grade-curriculum-subject", AccessLevel.ADMIN),
+                Map.entry("/set-curriculum-subject-type", AccessLevel.USER),
+                Map.entry("/curriculum-individual-student-matrix", AccessLevel.ADMIN),
+                Map.entry("/assign-curriculum-individual-subject", AccessLevel.ADMIN));
+        for (String path : expectedAccess.keySet()) {
             WebPath webPath = Registry.webPathRegistry().get(WebPath.PathInfo.get(path, RequestType.POST));
             assertNotNull(webPath, path + " must be registered");
             assertEquals(RequestType.POST, webPath.type());
             assertEquals("PostRequestHandler", webPath.handlerType());
-            assertEquals(AccessLevel.ADMIN, webPath.accessLevel());
+            assertEquals(expectedAccess.get(path), webPath.accessLevel());
             assertNotNull(Registry.postRequestHandlerRegistry().get(path), path + " handler must be registered");
         }
     }
