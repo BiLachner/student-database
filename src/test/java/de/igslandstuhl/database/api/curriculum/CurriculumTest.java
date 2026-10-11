@@ -1946,79 +1946,6 @@ class CurriculumTest {
         enrollment.subjectType(admin,id+2,"INDIVIDUAL","RELIGION_ETHIK");
         assertThrows(CurriculumException.class,()->enrollment.assignIndividualTeacher(admin,5,id,id+2,id));
     }
-    @Test void solGradeSixAllowsCoreAndOnlySelectedWpf() throws Exception {
-        var enrollment=enrollmentFixture();moveFixtureToGrade6();
-        enrollment.assignGrade(admin,6,id,List.of(id),List.of(new CurriculumEnrollment.Teaching(id,id,id),new CurriculumEnrollment.Teaching(id+1,id,id)));
-        enrollment.subjectType(admin,id+1,"INDIVIDUAL","WPF");
-        db.writeTransaction(c->{exec(c,"INSERT INTO curriculum_grade_teachers(semester,grade,subject,teacher) VALUES(?,?,?,?)",id,6,id+1,id);return null;});
-        enrollment.assignWpf(admin,id,new Curriculum.Scope(id,id+1,id,id),null);
-        assertEquals(Set.of(id,id+1),Set.copyOf(enrollment.studentSubjects(id,id)));
-        assertEquals(List.of(id),enrollment.studentSubjects(id+1,id));
-        db.writeTransaction(c->{exec(c,"INSERT INTO subjects(id,name) VALUES(?,?)",id+4,"Sport "+id);return null;});
-        assertThrows(CurriculumException.class,()->enrollment.assignGrade(admin,6,id,List.of(id+4),List.of(new CurriculumEnrollment.Teaching(id,id+4,id))));
-    }
-    @Test void wpfAssignmentIsIndividualAndRejectsStaleDragAndForeignClass() throws Exception {
-        var enrollment=enrollmentFixture();moveFixtureToGrade6();enrollment.subjectType(admin,id+1,true); db.writeTransaction(c->{exec(c,"INSERT INTO curriculum_grade_teachers(semester,grade,subject,teacher) VALUES(?,?,?,?)",id,6,id+1,id);return null;});
-        var wpf=new Curriculum.Scope(id,id+1,id,id);
-        enrollment.assignWpf(admin,id,wpf,null);
-        assertEquals(id+1,scalar("SELECT subject FROM curriculum_individual_assignments WHERE student=? AND semester=? AND assignment_group='WPF'",id,id));
-        assertEquals(id,scalar("SELECT teacher FROM curriculum_grade_teachers WHERE semester=? AND grade=6 AND subject=?",id,id+1));
-        assertEquals(0,scalar("SELECT COUNT(*) FROM curriculum_individual_assignments WHERE student=?",id+1));
-        assertThrows(CurriculumException.class,()->enrollment.assignWpf(admin,id,wpf,null));
-        assertThrows(CurriculumException.class,()->enrollment.assignWpf(admin,id+1,wpf,null));
-        assertThrows(CurriculumException.class,()->enrollment.assignWpf(teacher,id,wpf,id+1));
-        enrollment.assignWpf(admin,id,wpf,id+1);
-        assertEquals(1,scalar("SELECT COUNT(*) FROM curriculum_individual_assignments WHERE student=? AND semester=? AND assignment_group='WPF'",id,id));
-        assertEquals(1,enrollment.wpfRoster(admin,id,id).size());
-    }
-    @Test void wpfSwapKeepsOneChoiceAndPreservesOldContextWithoutAwardLoss() throws Exception {
-        var enrollment=enrollmentFixture();moveFixtureToGrade6();enrollment.subjectType(admin,id,true);enrollment.subjectType(admin,id+1,true); db.writeTransaction(c->{exec(c,"INSERT INTO curriculum_grade_teachers(semester,grade,subject,teacher) VALUES(?,?,?,?),(?,?,?,?)",id,6,id,id,id,6,id+1,id);return null;});
-        enrollment.assignWpf(admin,id,scope,null);
-        enrollment.assignWpf(admin,id,new Curriculum.Scope(id,id+1,id,id),id);
-        assertEquals(List.of(id+1),enrollment.selectedWpf(id,id));
-        assertThrows(CurriculumException.class,()->service.studentCatalog(Student.get(id),id,id));
-        enrollment.assignWpf(admin,id,scope,id+1);
-        int task=central(5);Student.get(id).changeTaskStatus(Task.get(task),Task.STATUS_COMPLETED);
-        assertThrows(CurriculumException.class,()->enrollment.assignWpf(admin,id,new Curriculum.Scope(id,id+1,id,id),id));
-        assertEquals(List.of(id),enrollment.selectedWpf(id,id));
-        assertEquals(5L,service.studentProgress(Student.get(id),id,id).get("totalTokens"));
-    }
-    @Test void solGradesAllowWpfButRejectReligionEthik() throws Exception {
-        var enrollment=enrollmentFixture();moveFixtureToGrade6();
-        db.writeTransaction(c->{
-            exec(c,"INSERT INTO subjects(id,name) VALUES(?,?)",id+2,"Evangelische Religion "+id);
-            return null;
-        });
-        enrollment.subjectType(admin,id+1,"INDIVIDUAL","WPF");
-        enrollment.subjectType(admin,id+2,"INDIVIDUAL","RELIGION_ETHIK"); db.writeTransaction(c->{exec(c,"INSERT INTO curriculum_grade_teachers(semester,grade,subject,teacher) VALUES(?,?,?,?),(?,?,?,?)",id,6,id+1,id,id,6,id+2,id);return null;});
-        db.writeTransaction(c->{
-            exec(c,"DELETE FROM teacher_classes WHERE teacher_id=?",id);
-            exec(c,"DELETE FROM teacher_subjects WHERE teacher_id=?",id);
-            return null;
-        });
-        enrollment.assignIndividual(admin,id,new Curriculum.Scope(id,id+1,id,id),"WPF",null);
-        assertThrows(CurriculumException.class,()->enrollment.assignIndividual(admin,id,new Curriculum.Scope(id,id+2,id,id),"RELIGION_ETHIK",null));
-        assertEquals(1,scalar("SELECT COUNT(*) FROM curriculum_individual_assignments WHERE student=? AND semester=?",id,id));
-        assertEquals(Set.of(id+1),Set.copyOf(enrollment.studentSubjects(id,id)));
-        assertEquals(2,scalar("SELECT COUNT(*) FROM curriculum_grade_teachers WHERE semester=? AND grade=6",id));
-    }
-    @Test void individualAssignmentAllowsOnlyOneSubjectPerGroup() throws Exception {
-        var enrollment=enrollmentFixture();moveFixtureToGrade6();
-        db.writeTransaction(c->{
-            exec(c,"INSERT INTO subjects(id,name) VALUES(?,?)",id+2,"WPF Kunst "+id);
-            exec(c,"INSERT INTO subjects(id,name) VALUES(?,?)",id+3,"Ethik "+id);
-            return null;
-        });
-        enrollment.subjectType(admin,id+1,"INDIVIDUAL","WPF");
-        enrollment.subjectType(admin,id+2,"INDIVIDUAL","WPF");
-        enrollment.subjectType(admin,id+3,"INDIVIDUAL","RELIGION_ETHIK"); db.writeTransaction(c->{exec(c,"INSERT INTO curriculum_grade_teachers(semester,grade,subject,teacher) VALUES(?,?,?,?),(?,?,?,?),(?,?,?,?)",id,6,id+1,id,id,6,id+2,id,id,6,id+3,id);return null;});
-        enrollment.assignIndividual(admin,id,new Curriculum.Scope(id,id+1,id,id),"WPF",null);
-        assertEquals(409,assertThrows(CurriculumException.class,()->enrollment.assignIndividual(admin,id,new Curriculum.Scope(id,id+2,id,id),"WPF",null)).status);
-        enrollment.assignIndividual(admin,id,new Curriculum.Scope(id,id+2,id,id),"WPF",id+1);
-        assertEquals(id+2,scalar("SELECT subject FROM curriculum_individual_assignments WHERE student=? AND semester=? AND assignment_group='WPF'",id,id));
-        assertThrows(CurriculumException.class,()->enrollment.assignIndividual(admin,id,new Curriculum.Scope(id,id+3,id,id),"RELIGION_ETHIK",null));
-        assertEquals(1,scalar("SELECT COUNT(*) FROM curriculum_individual_assignments WHERE student=? AND semester=?",id,id));
-    }
     @Test void removingManagedGradeSubjectWithoutWorkRemovesCurrentContexts() throws Exception {
         var enrollment=enrollmentFixture();
         enrollment.assignGrade(admin,13,id,List.of(id),teachingMappings());
@@ -2388,7 +2315,7 @@ class CurriculumTest {
         assertEquals(1,((List<?>)service.studentCatalog(Student.get(id),id,id).get("centralTasks")).size());
     }
     @Test void enrollmentAndPublicationRoutesRepeatRoleAndInputChecks() throws Exception {
-        for(String path:List.of("/curriculum-enrollment-catalog","/set-curriculum-subject-type","/assign-grade-curriculum","/curriculum-wpf-roster","/assign-curriculum-wpf","/assign-individual-grade-teacher")) {
+        for(String path:List.of("/curriculum-enrollment-catalog","/set-curriculum-subject-type","/assign-grade-curriculum","/curriculum-individual-student-matrix","/assign-curriculum-individual-subject","/assign-individual-grade-teacher")) {
             assertNotEquals(Status.OK,request(Teacher.get(id),path,body()).getStatus());
             assertEquals(Status.FORBIDDEN,request(Student.get(id),path,body()).getStatus());
         }

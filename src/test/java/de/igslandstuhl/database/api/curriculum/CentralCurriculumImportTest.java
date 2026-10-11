@@ -87,6 +87,9 @@ class CentralCurriculumImportTest {
             try (Statement s = legacy.getSQLConnection().createStatement()) {
                 s.executeUpdate("CREATE TABLE subjects(id INTEGER PRIMARY KEY,name TEXT)");
                 s.executeUpdate("CREATE TABLE curriculum_subject_types(subject INTEGER PRIMARY KEY,wpf INTEGER NOT NULL DEFAULT 0,mode TEXT NOT NULL,assignment_group TEXT)");
+                s.executeUpdate("CREATE TABLE curriculum_grade_subjects(grade INTEGER,semester INTEGER,subject INTEGER)");
+                s.executeUpdate("CREATE TABLE curriculum_individual_assignments(student INTEGER,semester INTEGER,assignment_group TEXT,subject INTEGER,PRIMARY KEY(student,semester,assignment_group))");
+                s.executeUpdate("CREATE TABLE student_curriculum_contexts(student INTEGER,subject INTEGER,semester INTEGER,teacher INTEGER,class INTEGER,grade INTEGER,course_group INTEGER)");
                 s.executeUpdate("CREATE TABLE semesters(id INTEGER PRIMARY KEY,label TEXT,position INTEGER,school_year INTEGER)");
                 s.executeUpdate("CREATE TABLE topics(id INTEGER PRIMARY KEY,name TEXT NOT NULL,subject INTEGER NOT NULL,grade INTEGER NOT NULL,resource TEXT,number INTEGER NOT NULL,semester INTEGER,UNIQUE(name,subject,grade),UNIQUE(grade,subject,number))");
                 s.executeUpdate("CREATE TABLE tasks(id INTEGER PRIMARY KEY,topic INTEGER NOT NULL,name TEXT NOT NULL,niveau INTEGER NOT NULL,tokens INTEGER NOT NULL,UNIQUE(topic,name))");

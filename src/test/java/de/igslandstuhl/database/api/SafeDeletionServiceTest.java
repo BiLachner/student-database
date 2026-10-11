@@ -133,12 +133,12 @@ class SafeDeletionServiceTest {
         assertEquals(1, count("tasks", "id", id));
     }
 
-    @Test void subjectDeleteRechecksDependenciesInsideDeleteTransaction() throws Exception {
+    @Test void subjectDeleteRechecksCanonicalDependenciesInsideDeleteTransaction() throws Exception {
         assertTrue(SafeDeletionService.subjectPreflight(db, id).deletable());
-        db.writeTransaction(c -> { exec(c, "INSERT INTO student_subjects(student_id,subject_id) VALUES(?,?)", id, id); return null; });
+        db.writeTransaction(c -> { exec(c, "INSERT INTO curriculum_grade_subjects(grade,semester,subject) VALUES(6,?,?)", id, id); return null; });
         assertThrows(ObjectInUseException.class, () -> SafeDeletionService.deleteSubject(db, id));
         assertEquals(1, count("subjects", "id", id));
-        assertEquals(1, count("student_subjects", "subject_id", id));
+        assertEquals(1, count("curriculum_grade_subjects", "subject", id));
     }
 
     @Test void protectedLegacyReligionAndEthikSubjectsCannotBeDeleted() throws Exception {

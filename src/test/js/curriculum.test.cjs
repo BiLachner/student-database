@@ -64,8 +64,6 @@ async function setup(admin, options={}){
   else if(options.enrollment && url==='/assign-class-subject-teacher')body={...data};
   else if(options.enrollment && url==='/assign-individual-grade-teacher')body={ok:true};
   else if(options.enrollment && url==='/curriculum-course-groups')body=options.courseGroups||[];
-  else if(options.enrollment && url==='/curriculum-wpf-roster')body=options.wpfRosterHandler?await options.wpfRosterHandler(data):(options.roster ?? [{id:50,first_name:'Test',last_name:'Kind',subjectId:null,teacherId:null}]);
-  else if(options.enrollment && url==='/assign-curriculum-wpf')body={ok:true};
   else if(url==='/curriculum-releases')body={topics:releaseTopics,tasks:releaseTasks,flexibleTopics:releaseFlexibleTopics,flexibleTasks:releaseFlexibleTasks};
   else if(url==='/set-curriculum-release'){
    if(data.topicId!=null)releaseTopics=releaseTopics.map(t=>t.id===data.topicId?{...t,active:data.active}:t);

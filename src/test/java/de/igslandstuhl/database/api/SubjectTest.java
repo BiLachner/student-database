@@ -22,18 +22,6 @@ public class SubjectTest {
         assertEquals(added, subject);
     }
     @Test
-    public void addSubjectToGrade() throws SQLException {
-        String classLabel = "5subject-" + System.nanoTime();
-        SchoolClass schoolClass = SchoolClass.addClass(classLabel, 5);
-        Subject subject = Subject.addSubject("Mathematik " + classLabel);
-        subject.addToGrade(5);
-        assertTrue(
-            schoolClass.getSubjects().stream().anyMatch(candidate -> candidate.getId() == subject.getId()),
-            "Subject not found in SchoolClass"
-        );
-    }
-
-    @Test
     public void studentDisplayNamesKeepTheCanonicalOrderWithoutPrefixes() {
         assertEquals("Deutsch", Subject.displayName("Deutsch"));
         assertEquals("Englisch", Subject.displayName("Englisch"));
