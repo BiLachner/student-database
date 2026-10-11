@@ -87,6 +87,14 @@ final class SolSubjectPolicy {
             requireAllowed(c,grade,subject);
     }
 
+    static boolean isRegularAssignmentAllowed(Connection c, int subject) throws SQLException {
+        var row = Curriculum.require(c,
+                "SELECT s.subject_code,t.mode,t.assignment_group FROM subjects s LEFT JOIN curriculum_subject_types t ON t.subject=s.id WHERE s.id=?", subject);
+        String code = row.get("subject_code") == null ? null : String.valueOf(row.get("subject_code"));
+        String mode = row.get("mode") == null ? null : String.valueOf(row.get("mode")).strip().toUpperCase(Locale.ROOT);
+        return "REGULAR".equals(mode) || (mode == null && code != null && CORE_CODES.contains(code));
+    }
+
     static List<Integer> activeSubjectIds(Connection c, int grade) throws SQLException {
         if (!isManagedGrade(grade)) return List.of();
         Set<Integer> ids = new LinkedHashSet<>();

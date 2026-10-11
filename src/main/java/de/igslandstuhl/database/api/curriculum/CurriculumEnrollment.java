@@ -92,13 +92,13 @@ public final class CurriculumEnrollment {
         curriculum.transaction(c->{ require(c,"SELECT id FROM semesters WHERE id=?",semesterId); write(c,"UPDATE semesters SET archived=0 WHERE id=?",semesterId); return null; });
     }
 
-    /** Assigns the canonical grade-wide teacher for one typed individual subject. */
-    public void assignIndividualTeacher(Actor actor,int grade,int semester,int subject,int teacher) throws SQLException {
+    /** Assigns or clears the canonical grade-wide teacher for one typed individual subject. */
+    public Map<String,Object> assignIndividualTeacher(Actor actor,int grade,int semester,int subject,Integer teacher) throws SQLException {
         admin(actor);
         if(grade<1 || grade>13) throw error(400,"invalid_input","Jahrgang muss zwischen 1 und 13 liegen.");
-        curriculum.transaction(c->{
+        return curriculum.transaction(c->{
             require(c,"SELECT id FROM semesters WHERE id=?",semester);
-            require(c,"SELECT id FROM teachers WHERE id=?",teacher);
+            if(teacher!=null) require(c,"SELECT id FROM teachers WHERE id=?",teacher);
             var type=rows(c,"SELECT mode,assignment_group FROM curriculum_subject_types WHERE subject=?",subject);
             if(type.isEmpty() || !"INDIVIDUAL".equals(String.valueOf(type.get(0).get("mode"))))
                 throw error(400,"invalid_input","Nur ausdrücklich als INDIVIDUAL definierte Fächer können jahrgangsweit zugeordnet werden.");
@@ -107,10 +107,37 @@ public final class CurriculumEnrollment {
             if(assignmentGroup == null || !Set.of("WPF","RELIGION_ETHIK").contains(assignmentGroup))
                 throw error(400,"invalid_input","Ungültige INDIVIDUAL-Zuordnungsgruppe.");
             SolSubjectPolicy.requireAllowed(c, grade, subject);
-            write(c,"INSERT INTO curriculum_grade_teachers(semester,grade,subject,teacher) VALUES(?,?,?,?) ON CONFLICT(semester,grade,subject) DO UPDATE SET teacher=excluded.teacher",semester,grade,subject,teacher);
-            write(c,"UPDATE course_groups SET teacher=? WHERE semester=? AND grade=? AND subject=?",teacher,semester,grade,subject);
-            write(c,"UPDATE student_curriculum_contexts SET teacher=? WHERE semester=? AND grade=? AND subject=?",teacher,semester,grade,subject);
-            return null;
+            if(teacher==null) {
+                write(c,"DELETE FROM curriculum_grade_teachers WHERE semester=? AND grade=? AND subject=?",semester,grade,subject);
+            } else {
+                write(c,"INSERT INTO curriculum_grade_teachers(semester,grade,subject,teacher) VALUES(?,?,?,?) ON CONFLICT(semester,grade,subject) DO UPDATE SET teacher=excluded.teacher",semester,grade,subject,teacher);
+                write(c,"UPDATE course_groups SET teacher=? WHERE semester=? AND grade=? AND subject=?",teacher,semester,grade,subject);
+                write(c,"UPDATE student_curriculum_contexts SET teacher=? WHERE semester=? AND grade=? AND subject=?",teacher,semester,grade,subject);
+            }
+            Map<String,Object> result=new LinkedHashMap<>();result.put("semesterId",semester);result.put("grade",grade);result.put("subjectId",subject);result.put("teacherId",teacher);return result;
+        });
+    }
+
+    /** Atomically assigns or clears one regular class/subject teacher. */
+    public Map<String,Object> assignClassSubjectTeacher(Actor actor,int semester,int classId,int subject,Integer teacher) throws SQLException {
+        admin(actor);
+        return curriculum.transaction(c->{
+            require(c,"SELECT id FROM semesters WHERE id=?",semester);
+            var schoolClass=require(c,"SELECT id,grade FROM classes WHERE id=? AND active=1 AND id<>0",classId);
+            int grade=integer(schoolClass,"grade");
+            require(c,"SELECT id FROM subjects WHERE id=?",subject);
+            var type=rows(c,"SELECT mode FROM curriculum_subject_types WHERE subject=?",subject);
+            String mode=type.isEmpty()?null:String.valueOf(type.get(0).get("mode"));
+            if(!SolSubjectPolicy.isRegularAssignmentAllowed(c,subject) || "INDIVIDUAL".equals(mode))
+                throw error(400,"invalid_input","Nur REGULAR-Fächer können klassenweise zugeordnet werden.");
+            SolSubjectPolicy.requireAllowed(c,grade,subject);
+            if(teacher!=null) require(c,"SELECT id FROM teachers WHERE id=?",teacher);
+            // The global activation is the source of visible rows. Keep the
+            // semester context operational without introducing a second UI step.
+            write(c,"INSERT INTO curriculum_grade_subjects(grade,semester,subject) VALUES(?,?,?) ON CONFLICT DO NOTHING",grade,semester,subject);
+            if(teacher==null) write(c,"DELETE FROM curriculum_class_teachers WHERE semester=? AND class=? AND subject=?",semester,classId,subject);
+            else write(c,"INSERT INTO curriculum_class_teachers(semester,class,subject,teacher) VALUES(?,?,?,?) ON CONFLICT(semester,class,subject) DO UPDATE SET teacher=excluded.teacher",semester,classId,subject,teacher);
+            Map<String,Object> result=new LinkedHashMap<>();result.put("semesterId",semester);result.put("classId",classId);result.put("subjectId",subject);result.put("teacherId",teacher);return result;
         });
     }
 

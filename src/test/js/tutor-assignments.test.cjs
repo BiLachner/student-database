@@ -25,7 +25,7 @@ const catalog={
 };
 
 test('compact semester and tutor controls are wired into the admin dashboard',()=>{
-  assert.equal(dashboard.includes('id="admin-enrollment"'),false);
+  assert.equal(dashboard.includes('id="admin-enrollment"'),true);
   assert.match(dashboard,/data-global-semester/);
   assert.match(dashboard,/data-create-next-semester/);
   assert.match(dashboard,/id="admin-tutors"/);

@@ -360,6 +360,75 @@ document.addEventListener('DOMContentLoaded', async () => {
         };
         const action=(parent,label,fn)=>{const b=el('button',label);b.type='button';parent.append(b);b.addEventListener('click',()=>run(async()=>{b.disabled=true;try{await fn();}finally{b.disabled=false;}}));return b;};
         const call=async(path,data,permission)=>{if(!await allowed(permission))throw Error(permissionDenied);return post(path,data);};
+        if(catalog.admin) {
+            const matrix=el('section'); matrix.className='admin-teacher-matrix'; matrix.setAttribute('aria-labelledby','teacher-matrix-heading'); section.append(matrix);
+            const matrixStatus=el('p'); matrixStatus.setAttribute('role','status'); matrixStatus.setAttribute('aria-live','polite'); matrix.append(el('h3','Lehrkräfte'),matrixStatus);
+            const busy=new Set();
+            let gradeChangeHandler=null, semesterChangeHandler=null;
+            const teacherLabel=t=>`${t.first_name||''} ${t.last_name||''}`.trim();
+            const currentKey=(semesterId,kind,left,subjectId)=>`${semesterId}:${kind}:${left}:${subjectId}`;
+            const reload=async()=>{
+                const data=await loadCatalog();
+                const semesterSelect=document.querySelector('[data-global-semester]');
+                const semesterId=Number(semesterSelect?.value||data.semesters.find(item=>item.active)?.id||data.semesters[0]?.id);
+                const grades=[...new Set(data.classes.map(item=>Number(item.grade)))].sort((a,b)=>a-b);
+                const selectedGrade=Number(matrix.querySelector('[data-teacher-matrix-grade]')?.value||grades[0]);
+                matrix.querySelectorAll('[data-teacher-matrix-controls],[data-teacher-matrix-table],[data-teacher-matrix-empty]').forEach(node=>node.remove());
+                if(!semesterId||!grades.length){matrix.append(el('p','Keine Halbjahre oder Klassen vorhanden.'));return;}
+                const controls=el('div');controls.dataset.teacherMatrixControls='true';controls.className='admin-grade-context';
+                const gradeLabel=el('label','Jahrgang '),gradeSelect=el('select');gradeSelect.dataset.teacherMatrixGrade='true';
+                grades.forEach(value=>{const option=el('option',String(value));option.value=String(value);gradeSelect.append(option);});
+                gradeSelect.value=String(grades.includes(selectedGrade)?selectedGrade:grades[0]);gradeLabel.append(gradeSelect);controls.append(gradeLabel);matrix.append(controls);
+                const classes=data.classes.filter(item=>Number(item.grade)===Number(gradeSelect.value)&&item.active!==false&&Number(item.id)!==0);
+                const activeIds=new Set((data.activeSubjectIdsByGrade?.[String(gradeSelect.value)]||[]).map(Number));
+                const subjectsById=new Map(data.subjects.map(subject=>[Number(subject.id),subject]));
+                const regularAssignments=new Set(data.teaching.filter(item=>Number(item.semesterId)===semesterId&&item.classId!=null&&classes.some(c=>Number(c.id)===Number(item.classId))).map(item=>Number(item.subjectId)));
+                const individualAssignments=new Set(data.teaching.filter(item=>Number(item.semesterId)===semesterId&&Number(item.grade)===Number(gradeSelect.value)&&item.classId==null).map(item=>Number(item.subjectId)));
+                const visible=data.subjects.filter(subject=>{
+                    const id=Number(subject.id),active=activeIds.has(id), stale=regularAssignments.has(id)||individualAssignments.has(id);
+                    if(subject.assignmentGroup==='WPF'&&Number(gradeSelect.value)!==6)return false;
+                    if(!active&&!stale)return false;
+                    return subject.mode==='REGULAR' || (subject.mode==='INDIVIDUAL'&&['RELIGION_ETHIK','WPF'].includes(subject.assignmentGroup));
+                }).sort((a,b)=>String(a.name).localeCompare(String(b.name),'de'));
+                const regular=visible.filter(subject=>subject.mode==='REGULAR');
+                const individual=visible.filter(subject=>subject.mode==='INDIVIDUAL');
+                if(!visible.length){const empty=el('p','Für diesen Jahrgang sind keine global aktivierten Fächer vorhanden.');empty.dataset.teacherMatrixEmpty='true';matrix.append(empty);return;}
+                const table=document.createElement('table');table.dataset.teacherMatrixTable='true';table.className='admin-teacher-matrix-table';
+                const caption=el('caption',`Lehrkräfte für Jahrgang ${gradeSelect.value}`);table.append(caption);
+                const head=el('tr');const headers=['Fach',...classes.map(item=>item.label),'Jahrgang'];headers.forEach((label,index)=>{const th=el('th',label);th.scope='col';if(index===0)th.className='teacher-matrix-subject';head.append(th);});table.append(head);
+                const assignments=data.teaching.filter(item=>Number(item.semesterId)===semesterId);
+                const optionsFor=(subject,existingId)=>{
+                    const values=[{id:'',name:'— nicht zugeordnet —'}];const seen=new Set();
+                    for(const teacher of data.teachers){const id=Number(teacher.id);seen.add(id);values.push({id:String(id),name:teacherLabel(teacher)});}
+                    if(existingId!=null&&!seen.has(Number(existingId))){const stale=data.teachers.find(t=>Number(t.id)===Number(existingId));values.push({id:String(existingId),name:stale?teacherLabel(stale):`Lehrkraft ${existingId} (aktuell zugeordnet)`});}
+                    return values;
+                };
+                const saveCell=async(select,previous,payload,statusNode,key)=>{
+                    if(busy.has(key))return;busy.add(key);select.disabled=true;statusNode.textContent='Wird gespeichert …';
+                    try { const result=await call(payload.path,payload.body,'curriculum_manage_enrollment'); const canonical=result?.teacherId==null?'':String(result.teacherId);select.value=canonical;statusNode.textContent='Gespeichert';
+                    } catch(error){select.value=previous;statusNode.textContent='Änderung fehlgeschlagen';matrixStatus.textContent=error.message;}
+                    finally {busy.delete(key);select.disabled=false;}
+                };
+                const addSelect=(cell,label,subject,existing,payload,key)=>{
+                    const wrapper=el('label');wrapper.className='teacher-matrix-control';wrapper.append(el('span',label));const select=el('select');select.setAttribute('aria-label',`${subject.name}, ${label}`);optionsFor(subject,existing).forEach(item=>{const option=el('option',item.label||item.name);option.value=String(item.id);select.append(option);});select.value=existing==null?'':String(existing);const state=el('small');state.className='teacher-matrix-save-status';state.setAttribute('aria-live','polite');wrapper.append(select,state);cell.append(wrapper);
+                    let previous=select.value;select.addEventListener('change',()=>{const next=select.value;saveCell(select,previous,{path:payload.path,body:payload.body(next)},state,key).then(()=>{if(select.value===next)previous=next;});});
+                };
+                const appendRow=(subject)=>{const row=el('tr');const heading=el('th',subject.name);heading.scope='row';heading.className='teacher-matrix-subject';row.append(heading);if(subject.mode==='REGULAR'){
+                    for(const schoolClass of classes){const cell=el('td');cell.dataset.label=schoolClass.label;const found=assignments.find(item=>Number(item.classId)===Number(schoolClass.id)&&Number(item.subjectId)===Number(subject.id));addSelect(cell,schoolClass.label,subject,found?.teacherId,{path:'/assign-class-subject-teacher',body:next=>({semesterId,classId:Number(schoolClass.id),subjectId:Number(subject.id),teacherId:next===''?null:Number(next)})},currentKey(semesterId,'class',schoolClass.id,subject.id));row.append(cell);}
+                    const empty=el('td','—');empty.dataset.label='Jahrgang';row.append(empty);
+                } else {for(const schoolClass of classes){const empty=el('td','—');empty.dataset.label=schoolClass.label;row.append(empty);}const cell=el('td');cell.dataset.label='Jahrgang';const found=assignments.find(item=>item.classId==null&&Number(item.grade)===Number(gradeSelect.value)&&Number(item.subjectId)===Number(subject.id));addSelect(cell,`Jahrgang ${gradeSelect.value}`,subject,found?.teacherId,{path:'/assign-individual-grade-teacher',body:next=>({grade:Number(gradeSelect.value),semesterId,subjectId:Number(subject.id),teacherId:next===''?null:Number(next)})},currentKey(semesterId,'grade',gradeSelect.value,subject.id));row.append(cell);}
+                    table.append(row);};
+                [...regular,...individual].forEach(appendRow);const wrap=el('div');wrap.className='admin-teacher-matrix-table-wrap';wrap.append(table);matrix.append(wrap);
+                // Rebind is deliberately local to the rendered table; changing
+                // semester or grade always obtains a fresh canonical catalog.
+                if(gradeChangeHandler)gradeSelect.removeEventListener('change',gradeChangeHandler);
+                gradeChangeHandler=reload;gradeSelect.addEventListener('change',gradeChangeHandler);
+                if(semesterSelect){if(semesterChangeHandler)semesterSelect.removeEventListener('change',semesterChangeHandler);semesterChangeHandler=reload;semesterSelect.addEventListener('change',semesterChangeHandler);}
+            };
+            const loadCatalog=()=>call('/curriculum-enrollment-catalog',{},'curriculum_manage_enrollment');
+            await reload();
+            return;
+        }
         if(catalog.admin && await allowed('curriculum_publish')) {
             const panel=el('details');panel.hidden=Boolean(catalog.admin);panel.append(el('summary','Themen und Etappen für die Klasse freischalten'));section.append(panel);
             panel.append(el('p','Verwendet die oben ausgewählte Klasse, das Fach und das Halbjahr. Eine Themenfreigabe gilt auch für künftig ergänzte Etappen. Einzelne Etappen können abweichend gesperrt werden. Verdiente Münzen bleiben erhalten.'));
@@ -916,7 +985,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // B4 keeps admin semester/tutor controls in the compact dashboard.
         // Never fall back to mounting the retired enrollment editor into the
         // central curriculum mount when the legacy enrollment mount is absent.
-        if(catalog.enrollmentEnabled && (!catalog.admin || adminEnrollmentRoot))await mountEnrollment(catalog,()=>{
+        if(catalog.enrollmentEnabled && (!catalog.admin || adminEnrollmentRoot || adminCentralRoot))await mountEnrollment(catalog,()=>{
             const context = selectedTeacherContext();
             return teacherMode && context ? {subjectId:context.subjectId,semesterId:context.semesterId,classId:context.classId,teacherId:catalog.teacherId}
                 : {subjectId:Number(subject.value),semesterId:Number(semester.value),classId:Number(schoolClass.value),teacherId:teacher?Number(teacher.value):catalog.teacherId};

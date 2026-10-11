@@ -90,7 +90,7 @@ for (const [hash,section,label] of [
 test('admin dashboard keeps central curriculum separate from compact enrollment controls',()=>{
   const dom=setup('#curriculum');
   try {
-    assert.equal(dom.window.document.querySelector('#admin-enrollment'),null);
+    assert.ok(dom.window.document.querySelector('#admin-enrollment'));
     assert.ok(dom.window.document.querySelector('#admin-central-curriculum'));
     assert.ok(dom.window.document.querySelector('#admin-tutors'));
     assert.ok(dom.window.document.querySelector('[data-global-semester]'));

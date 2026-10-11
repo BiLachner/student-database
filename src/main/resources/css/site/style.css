@@ -5,6 +5,28 @@ body {
   padding: 20px;
 }
 
+.admin-shell .admin-teacher-matrix { margin:1rem 0; padding:1rem; background:var(--admin-sandstone-050); border:1px solid var(--admin-border); border-radius:.65rem; }
+.admin-teacher-matrix-table-wrap { width:100%; overflow:hidden; }
+.admin-teacher-matrix-table { width:100%; border-collapse:collapse; table-layout:auto; }
+.admin-teacher-matrix-table caption { padding:.4rem 0 .75rem; text-align:left; font-weight:700; color:var(--admin-sandstone-950); }
+.admin-teacher-matrix-table th, .admin-teacher-matrix-table td { padding:.45rem; border-bottom:1px solid var(--admin-border); text-align:left; vertical-align:middle; }
+.admin-teacher-matrix-table .teacher-matrix-subject { min-width:10rem; }
+.admin-teacher-matrix-control { display:flex; flex-direction:column; gap:.15rem; min-width:0; }
+.admin-teacher-matrix-control > span { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); }
+.admin-teacher-matrix-control select { width:100%; min-width:7rem; max-width:13rem; }
+.teacher-matrix-save-status { min-height:1.1em; color:var(--admin-muted); }
+@media (max-width:700px) {
+  .admin-teacher-matrix-table, .admin-teacher-matrix-table tbody, .admin-teacher-matrix-table tr, .admin-teacher-matrix-table td, .admin-teacher-matrix-table th { display:block; width:auto; }
+  .admin-teacher-matrix-table thead { display:none; }
+  .admin-teacher-matrix-table tr:first-of-type { display:none; }
+  .admin-teacher-matrix-table tr { padding:.75rem 0; border-bottom:1px solid var(--admin-border); }
+  .admin-teacher-matrix-table th.teacher-matrix-subject { min-width:0; padding:.15rem 0 .45rem; border:0; font-size:1rem; }
+  .admin-teacher-matrix-table td { display:grid; grid-template-columns:minmax(4.5rem, 28%) minmax(0, 1fr); gap:.5rem; padding:.25rem 0; border:0; }
+  .admin-teacher-matrix-table td::before { content:attr(data-label); color:var(--admin-muted); font-weight:700; }
+  .admin-teacher-matrix-table td[data-label='Jahrgang'] { display:grid; }
+  .admin-teacher-matrix-control select { min-width:0; max-width:none; }
+}
+
 #dashboard, #results, #students, #teachers, #classes, body > #subjects, #rooms {
   max-width: 900px;
   margin: auto;

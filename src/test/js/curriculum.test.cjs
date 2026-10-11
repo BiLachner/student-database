@@ -7,7 +7,7 @@ const script=fs.readFileSync(path.join(__dirname,'../../main/resources/js/site/c
 const tick=()=>new Promise(resolve=>setTimeout(resolve,20));
 async function setup(admin, options={}){
  const markup=options.adminDashboard
-  ? '<section id="schuljahr"><select data-global-semester></select></section><section id="curriculum-admin"><div id="admin-central-curriculum"></div></section>'
+  ? '<section id="schuljahr"><select data-global-semester></select><div id="admin-enrollment"></div></section><section id="curriculum-admin"><div id="admin-central-curriculum"></div></section>'
   : (options.overview?'<section id="overview"></section>':'')+(admin?'<select data-global-semester></select>':'')+'<section id="curriculum"></section>'+(options.progress?'<section id="student-progress"></section>':'');
  const dom=new JSDOM(markup,{url:'https://school.example.invalid/',runScripts:'outside-only'});
  dom.window.scrollTo=()=>{};
@@ -61,6 +61,7 @@ async function setup(admin, options={}){
   const tasks=byClass.get(data.classId)||[];
   if(options.enrollment && url==='/curriculum-enrollment-catalog')body={...catalog,gradeSubjects:options.gradeSubjects ?? [{grade:5,semesterId:20,subjectId:1}],activeSubjectIdsByGrade:options.activeSubjectIdsByGrade,nextSemesterPreview:{label:'2026_27_HJ2',schoolYear:'2026/27',semester:2,newSchoolYear:false,frameCopied:true,tutorsCopied:true},classes:options.enrollmentClasses ?? catalog.classes,subjects:options.enrollmentSubjects ?? [{id:1,name:'Math',wpf:0,mode:'REGULAR',assignmentGroup:null,typeExplicit:1},{id:4,name:'WPF Kunst',wpf:1,mode:'INDIVIDUAL',assignmentGroup:'WPF',typeExplicit:1},{id:5,name:'WPF Technik',wpf:1,mode:'INDIVIDUAL',assignmentGroup:'WPF',typeExplicit:1},{id:6,name:'Evangelische Religion',wpf:0,mode:'INDIVIDUAL',assignmentGroup:'RELIGION_ETHIK',typeExplicit:1},{id:7,name:'Ethik',wpf:0,mode:'INDIVIDUAL',assignmentGroup:'RELIGION_ETHIK',typeExplicit:1}],teaching:options.teaching ?? [{classId:10,subjectId:1,teacherId:7,semesterId:20},{classId:11,subjectId:1,teacherId:7,semesterId:20},{grade:5,subjectId:4,teacherId:7,semesterId:20},{grade:5,subjectId:5,teacherId:7,semesterId:20},{grade:5,subjectId:6,teacherId:7,semesterId:20},{grade:5,subjectId:7,teacherId:7,semesterId:20}]};
   else if(options.enrollment && url==='/assign-grade-curriculum')body={students:2,assignments:2};
+  else if(options.enrollment && url==='/assign-class-subject-teacher')body={...data};
   else if(options.enrollment && url==='/assign-individual-grade-teacher')body={ok:true};
   else if(options.enrollment && url==='/curriculum-course-groups')body=options.courseGroups||[];
   else if(options.enrollment && url==='/curriculum-wpf-roster')body=options.wpfRosterHandler?await options.wpfRosterHandler(data):(options.roster ?? [{id:50,first_name:'Test',last_name:'Kind',subjectId:null,teacherId:null}]);
@@ -767,19 +768,34 @@ test('context change invalidates an old topic form',async()=>{
 });
 
 async function clickNamed(dom,root,name){const b=[...root.querySelectorAll('button')].find(b=>b.textContent===name);assert(b,name);b.click();await tick();}
-for (const label of [
-  'REGULAR-Fächer-Block', 'globale Lehrkraftmatrix', 'individuelle Fachgruppen',
-  'individuelle Schülerzuordnung', 'globale Aktivierungs-Picker', 'alte Semesteraktionen',
-  'alte Enrollment-Speicheraktionen', 'alte Setup-Steuerung'
-]) test(`admin curriculum no longer mounts ${label}`,async()=>{
+test('admin curriculum mounts one combined teacher matrix without legacy teacher blocks',async()=>{
  const {dom,root,requests}=await setup(true,{enrollment:true,adminDashboard:true});
  try {
   assert.ok(root.querySelector('.central-curriculum-import'));
-  assert.equal(root.querySelector('.curriculum-enrollment'),null);
-  assert.equal(root.querySelector('.admin-regular-subject-picker'),null);
-  assert.equal(root.querySelector('.admin-individual-teachers'),null);
-  assert.equal(root.querySelector('[data-global-semester]'),null);
+  const matrix=dom.window.document.querySelector('.admin-teacher-matrix');assert.ok(matrix);
+  assert.equal(dom.window.document.querySelector('.admin-regular-subject-picker'),null);
+  assert.equal(dom.window.document.querySelector('.admin-individual-teachers'),null);
+  assert.equal(matrix.querySelectorAll('button').length,0);
   assert.equal(requests.some(r=>['/assign-grade-curriculum','/assign-individual-grade-teacher','/assign-curriculum-wpf'].includes(r.url)),false);
+ } finally {dom.window.close();}
+});
+test('teacher matrix renders active regular classes and grade-wide individual rows',async()=>{
+ const {dom,root,requests}=await setup(true,{enrollment:true,adminDashboard:true,activeSubjectIdsByGrade:{5:[1,2,6,7],6:[1,4,5,6]},enrollmentSubjects:[
+  {id:1,name:'Deutsch',mode:'REGULAR',assignmentGroup:null,typeExplicit:1},
+  {id:2,name:'Musik',mode:'REGULAR',assignmentGroup:null,typeExplicit:1},
+  {id:4,name:'WPF Französisch',mode:'INDIVIDUAL',assignmentGroup:'WPF',typeExplicit:1},
+  {id:6,name:'Ethik01',mode:'INDIVIDUAL',assignmentGroup:'RELIGION_ETHIK',typeExplicit:1},
+  {id:7,name:'Reli01',mode:'INDIVIDUAL',assignmentGroup:'RELIGION_ETHIK',typeExplicit:1}
+ ],teaching:[{classId:10,subjectId:1,teacherId:7,semesterId:20},{grade:5,subjectId:6,teacherId:7,semesterId:20}]});
+ try {
+  const table=dom.window.document.querySelector('.admin-teacher-matrix-table');assert.ok(table);
+  const text=table.textContent;
+  assert.match(text,/Deutsch/);assert.match(text,/Musik/);assert.match(text,/Ethik01/);assert.match(text,/Reli01/);assert.doesNotMatch(text,/WPF Französisch/);
+  const deutsch=[...table.querySelectorAll('tr')].find(row=>row.querySelector('th')?.textContent==='Deutsch');assert.equal(deutsch.querySelectorAll('select').length,2);
+  const ethik=[...table.querySelectorAll('tr')].find(row=>row.querySelector('th')?.textContent==='Ethik01');assert.equal(ethik.querySelectorAll('select').length,1);
+  const select=deutsch.querySelector('select');select.value='';select.dispatchEvent(new dom.window.Event('change'));await tick();
+  assert.equal(requests.filter(request=>request.url==='/assign-class-subject-teacher').length,1);
+  assert.equal(requests.find(request=>request.url==='/assign-class-subject-teacher').data.teacherId,null);
  } finally {dom.window.close();}
 });
 test('teacher publishes a whole topic or individual task but has no enrollment UI',async()=>{
@@ -801,10 +817,10 @@ test('admin dashboard keeps one semester selector and sections in the shell',asy
  const {dom,root,requests}=await setup(true,{enrollment:true,adminDashboard:true});try{
   const enrollment=dom.window.document.querySelector('#admin-enrollment');
   const central=dom.window.document.querySelector('#admin-central-curriculum');
-  assert.equal(enrollment,null);assert.ok(central);assert.equal(dom.window.document.querySelectorAll('#curriculum').length,0);
+  assert.ok(enrollment);assert.ok(enrollment.querySelector('.admin-teacher-matrix'));assert.ok(central);assert.equal(dom.window.document.querySelectorAll('#curriculum').length,0);
   assert.ok(central.querySelector('.central-curriculum-import'));
   assert.equal(dom.window.document.querySelectorAll('#schuljahr [data-global-semester]').length,1);
-  assert.equal(dom.window.document.querySelector('#schuljahr .curriculum-enrollment'),null);
+  assert.ok(dom.window.document.querySelector('#schuljahr .admin-teacher-matrix'));
   assert.match(central.textContent,/Zentrale Themen und Etappen/);
   assert.match(central.textContent,/Thema umbenennen/);
   assert.match(central.textContent,/Etappe anlegen/);

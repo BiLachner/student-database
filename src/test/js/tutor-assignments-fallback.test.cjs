@@ -12,7 +12,7 @@ const tick=()=>new Promise(resolve=>setTimeout(resolve,30));
 test('raw admin dashboard visibly advertises tutor assignments after enrollment',()=>{
   assert.match(dashboard,/id="admin-tutors"[^>]*>[\s\S]*Tutor:innen je Klasse/);
   assert.match(dashboard,/Tutorzuordnungen werden geladen/);
-  assert.equal(dashboard.includes('id="admin-enrollment"'),false);
+  assert.equal(dashboard.includes('id="admin-enrollment"'),true);
 });
 
 test('javascript keeps fallback markup and fills the content area',async()=>{
