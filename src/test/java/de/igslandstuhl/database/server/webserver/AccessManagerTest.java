@@ -162,11 +162,14 @@ public class AccessManagerTest {
 
     @Test
     public void subjectManagementPostRoutesAreRegisteredAndAccessControlled() {
-        for (String path : new String[]{"/subject-management-catalog", "/set-subject-grade-activations"}) {
+        for (String path : new String[]{
+                "/subject-management-catalog", "/set-subject-grade-activations",
+                "/set-curriculum-subject-type", "/edit-subject",
+                "/add-subject-with-type", "/delete-subject"}) {
             assertNotNull(Registry.webPathRegistry().get(WebPath.PathInfo.get(path, RequestType.POST)), path);
             assertTrue(AccessManager.getInstance().hasAccess(admin, path, getRequest, RequestType.POST), path);
-            assertFalse(AccessManager.getInstance().hasAccess(teacher, path, getRequest, RequestType.POST), path);
-            assertFalse(AccessManager.getInstance().hasAccess(student, path, getRequest, RequestType.POST), path);
+            assertTrue(AccessManager.getInstance().hasAccess(teacher, path, getRequest, RequestType.POST), path);
+            assertTrue(AccessManager.getInstance().hasAccess(student, path, getRequest, RequestType.POST), path);
             assertFalse(AccessManager.getInstance().hasAccess(anonymous, path, getRequest, RequestType.POST), path);
         }
     }

@@ -177,7 +177,7 @@
         "type": "POST",
         "handler_type": "PostRequestHandler",
         "namespaces": [],
-        "access_level": "admin"
+        "access_level": "user"
     },
     "/delete-teacher": {
         "type": "POST",
@@ -189,7 +189,7 @@
         "type": "POST",
         "handler_type": "PostRequestHandler",
         "namespaces": [],
-        "access_level": "admin"
+        "access_level": "user"
     },
     "/delete-class": {
         "type": "POST",
@@ -536,19 +536,19 @@
         "type": "POST",
         "handler_type": "PostRequestHandler",
         "namespaces": [],
-        "access_level": "admin"
+        "access_level": "user"
     },
     "/subject-management-catalog": {
         "type": "POST",
         "handler_type": "PostRequestHandler",
         "namespaces": [],
-        "access_level": "admin"
+        "access_level": "user"
     },
     "/set-subject-grade-activations": {
         "type": "POST",
         "handler_type": "PostRequestHandler",
         "namespaces": [],
-        "access_level": "admin"
+        "access_level": "user"
     },
     "/curriculum-course-groups": {
         "type": "POST",
@@ -560,7 +560,7 @@
         "type": "POST",
         "handler_type": "PostRequestHandler",
         "namespaces": [],
-        "access_level": "admin"
+        "access_level": "user"
     },
     "/remove-grade-curriculum-subject": {"type":"POST","handler_type":"PostRequestHandler","namespaces":[],"access_level":"admin"},
     "/assign-grade-curriculum": {
