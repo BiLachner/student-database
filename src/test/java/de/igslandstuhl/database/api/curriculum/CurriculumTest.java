@@ -1814,7 +1814,7 @@ class CurriculumTest {
         assertEquals(1,scalar("SELECT COUNT(*) FROM course_group_members WHERE course_group=? AND student=?",copiedGroup,id));
         assertEquals(1,scalar("SELECT COUNT(*) FROM curriculum_individual_assignments WHERE student=? AND semester=? AND subject=?",id,hj2Id,id+1));
         assertEquals(0,scalar("SELECT COUNT(*) FROM topics WHERE semester=?",hj2Id));
-        assertEquals(0,scalar("SELECT COUNT(*) FROM school_years WHERE current_semester=?",hj2Id));
+        assertEquals(1,scalar("SELECT COUNT(*) FROM school_years WHERE current_semester=?",hj2Id));
         Map<String,Object> nextYear=enrollment.createNextSemester(admin);int nextId=((Number)nextYear.get("id")).intValue();
         assertEquals("2099_00_HJ1",nextYear.get("label"));assertEquals(true,nextYear.get("newSchoolYear"));assertEquals(false,nextYear.get("frameCopied"));assertEquals(true,nextYear.get("tutorsCopied"));
         assertEquals(0,scalar("SELECT COUNT(*) FROM curriculum_grade_subjects WHERE semester=?",nextId));

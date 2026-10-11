@@ -422,13 +422,13 @@
         "type": "POST",
         "handler_type": "PostRequestHandler",
         "namespaces": [],
-        "access_level": "admin"
+        "access_level": "user"
     },
     "/assign-class-tutors": {
         "type": "POST",
         "handler_type": "PostRequestHandler",
         "namespaces": [],
-        "access_level": "admin"
+        "access_level": "user"
     },
     "/curriculum-teacher-roster": {
         "type": "POST",
@@ -603,12 +603,12 @@
         "type": "POST",
         "handler_type": "PostRequestHandler",
         "namespaces": [],
-        "access_level": "admin"
+        "access_level": "user"
     },
     "/activate-curriculum-semester": {
         "type": "POST",
         "handler_type": "PostRequestHandler",
         "namespaces": [],
-        "access_level": "admin"
+        "access_level": "user"
     }
 }

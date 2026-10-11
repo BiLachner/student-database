@@ -7,7 +7,7 @@ const script=fs.readFileSync(path.join(__dirname,'../../main/resources/js/site/c
 const tick=()=>new Promise(resolve=>setTimeout(resolve,20));
 async function setup(admin, options={}){
  const markup=options.adminDashboard
-  ? '<section id="schuljahr"><select data-global-semester></select><div id="admin-enrollment"></div></section><section id="curriculum-admin"><div id="admin-central-curriculum"></div></section>'
+  ? '<section id="schuljahr"><select data-global-semester></select></section><section id="curriculum-admin"><div id="admin-central-curriculum"></div></section>'
   : (options.overview?'<section id="overview"></section>':'')+(admin?'<select data-global-semester></select>':'')+'<section id="curriculum"></section>'+(options.progress?'<section id="student-progress"></section>':'');
  const dom=new JSDOM(markup,{url:'https://school.example.invalid/',runScripts:'outside-only'});
  dom.window.scrollTo=()=>{};
@@ -767,98 +767,20 @@ test('context change invalidates an old topic form',async()=>{
 });
 
 async function clickNamed(dom,root,name){const b=[...root.querySelectorAll('button')].find(b=>b.textContent===name);assert(b,name);b.click();await tick();}
-test('admin grade batch excludes individual subjects and submits every regular class teacher assignment',async()=>{
- const {dom,root,requests}=await setup(true,{enrollment:true});try{
-  const panel=root.querySelector('.curriculum-enrollment');await clickNamed(dom,panel,'Jetzt verwalten');await clickNamed(dom,panel,'Auswahl bestätigen');
-  const rows=[...panel.querySelectorAll('.semester-create-panel .curriculum-wpf-table tr')].slice(1);assert.equal(rows.length,2);
-  assert.deepEqual([...panel.querySelectorAll('.semester-create-panel .curriculum-wpf-table tr:first-child th')].map(cell=>cell.scope),['col','col','col']);assert.equal(rows[0].querySelector('th[scope="row"]').textContent,'5a');
-  assert.deepEqual(rows.map(r=>r.cells[1].textContent),['Math','Math']);
-  await clickNamed(dom,panel,'Ausgewählte Lehrkräfte-Zuordnungen speichern');
-  const request=requests.find(r=>r.url==='/assign-grade-curriculum');assert.deepEqual(request.data.subjectIds,[1]);assert.equal(request.data.teaching.length,2);assert.equal(request.data.semesterId,20);
-  assert.match(panel.textContent,/2 Kinder, 2 Fachzuordnungen/);
- }finally{dom.window.close();}
-});
-test('admin grade batch submits only selected teacher rows',async()=>{
- const {dom,root,requests}=await setup(true,{enrollment:true,teaching:[]});try{
-  const panel=root.querySelector('.curriculum-enrollment');await clickNamed(dom,panel,'Jetzt verwalten');await clickNamed(dom,panel,'Auswahl bestätigen');
-  const selects=panel.querySelectorAll('.semester-create-panel .curriculum-wpf-table select');selects[0].value='7';
-  await clickNamed(dom,panel,'Ausgewählte Lehrkräfte-Zuordnungen speichern');
-  const writes=requests.filter(r=>r.url==='/assign-grade-curriculum');assert.equal(writes.length,1);assert.deepEqual(writes[0].data.teaching,[{classId:10,subjectId:1,teacherId:7}]);
- }finally{dom.window.close();}
-});
-test('admin grade batch does not request when no teacher is selected',async()=>{
- const {dom,root,requests}=await setup(true,{enrollment:true,teaching:[]});try{
-  const panel=root.querySelector('.curriculum-enrollment');await clickNamed(dom,panel,'Jetzt verwalten');await clickNamed(dom,panel,'Auswahl bestätigen');
-  await clickNamed(dom,panel,'Ausgewählte Lehrkräfte-Zuordnungen speichern');
-  assert.equal(requests.filter(r=>r.url==='/assign-grade-curriculum').length,0);assert.match(panel.textContent,/Bitte mindestens eine Lehrkraft auswählen/);
- }finally{dom.window.close();}
-});
-test('admin grade batch uses the single global semester selector',async()=>{
- const {dom,root}=await setup(true,{enrollment:true,teaching:[{classId:10,subjectId:1,teacherId:7,semesterId:20},{classId:11,subjectId:1,teacherId:7,semesterId:21}]});try{
-  const panel=root.querySelector('.curriculum-enrollment');await clickNamed(dom,panel,'Jetzt verwalten');await clickNamed(dom,panel,'Auswahl bestätigen');
-  let selects=panel.querySelectorAll('.semester-create-panel .curriculum-wpf-table select');assert.equal(selects[0].value,'7');assert.equal(selects[1].value,'');
-  const semester=dom.window.document.querySelector('[data-global-semester]');assert.ok(semester);semester.value='21';semester.dispatchEvent(new dom.window.Event('change'));await clickNamed(dom,panel,'Lehrkräfte-Tabelle aufbauen');
-  selects=panel.querySelectorAll('.semester-create-panel .curriculum-wpf-table select');assert.equal(selects[0].value,'');assert.equal(selects[1].value,'7');
- }finally{dom.window.close();}
-});
-test('curriculum regular picker uses global activation and preserves inactive assignments',async()=>{
- const subjects=[
-  {id:1,name:'Deutsch',subjectCode:'DE',mode:'UNSPECIFIED',regularEligible:true},
-  {id:2,name:'Englisch',subjectCode:'EN',mode:'UNSPECIFIED',regularEligible:true},
-  {id:4,name:'WPF Französisch',mode:'INDIVIDUAL',assignmentGroup:'WPF',wpf:1},
-  {id:8,name:'Musik',mode:'UNSPECIFIED',regularEligible:false}
- ];
- const {dom,root}=await setup(true,{enrollment:true,enrollmentSubjects:subjects,enrollmentClasses:[{id:10,label:'5a',grade:5},{id:11,label:'6a',grade:6}],activeSubjectIdsByGrade:{'5':[1],'6':[1,2,4]},gradeSubjects:[{grade:5,semesterId:20,subjectId:2}],teaching:[]});try{
-  const panel=root.querySelector('.curriculum-enrollment');await clickNamed(dom,panel,'Jetzt verwalten');await clickNamed(dom,panel,'Auswahl bestätigen');
-  const picker=panel.querySelector('.admin-regular-subject-picker');assert.ok(picker);
-  assert.equal(picker.querySelector('input[value="1"]').disabled,false);
-  const legacy=picker.querySelector('input[value="2"]');assert.equal(legacy.disabled,true);assert.match(picker.textContent,/Global nicht mehr aktiv/);
-  assert.equal(picker.querySelector('input[value="4"]'),null);
-  assert.equal(picker.querySelector('input[value="8"]'),null);
- }finally{dom.window.close();}
-});
-test('curriculum WPF roster filters new targets and keeps an inactive current assignment',async()=>{
- const subjects=[
-  {id:1,name:'Deutsch',subjectCode:'DE',mode:'UNSPECIFIED',regularEligible:true},
-  {id:4,name:'WPF Französisch',mode:'INDIVIDUAL',assignmentGroup:'WPF',wpf:1},
-  {id:5,name:'WPF Ökologie',mode:'INDIVIDUAL',assignmentGroup:'WPF',wpf:1},
-  {id:6,name:'Religion',mode:'INDIVIDUAL',assignmentGroup:'RELIGION_ETHIK',wpf:0}
- ];
- const {dom,root}=await setup(true,{enrollment:true,enrollmentSubjects:subjects,enrollmentClasses:[{id:10,label:'5a',grade:5},{id:11,label:'6a',grade:6}],activeSubjectIdsByGrade:{'5':[1],'6':[1,4]},teaching:[],roster:[{id:50,first_name:'Ada',last_name:'Alpha',subjectId:5,subjectGloballyAvailable:false,teacherId:null}]});try{
-  const panel=root.querySelector('.curriculum-enrollment');await clickNamed(dom,panel,'Jetzt verwalten');
-  const grade=panel.querySelector('#grade-setup select');assert.ok(grade);grade.value='6';grade.dispatchEvent(new dom.window.Event('change'));await tick();await clickNamed(dom,panel,'Auswahl bestätigen');
-  const group=[...panel.querySelectorAll('select')].find(select=>[...select.options].some(option=>option.value==='WPF'));assert.ok(group);group.value='WPF';group.dispatchEvent(new dom.window.Event('change'));await tick();await clickNamed(dom,panel,'Zuordnungen laden');
-  const subjectSelect=panel.querySelector('.curriculum-wpf-board table tr:nth-child(2) select');assert.ok(subjectSelect);
-  assert.ok(subjectSelect.querySelector('option[value="4"]'));
-  const inactive=subjectSelect.querySelector('option[value="5"]');assert.ok(inactive);assert.equal(inactive.disabled,false);assert.match(subjectSelect.parentElement.parentElement.textContent,/Aktuelle Zuordnung, global nicht mehr aktiv/);
-  assert.equal(subjectSelect.querySelector('option[value="6"]'),null);
- }finally{dom.window.close();}
-});
-test('individual subject groups save independently through the guarded assignment endpoint',async()=>{
- const teaching=[{grade:5,subjectId:4,teacherId:7,semesterId:20},{grade:5,subjectId:5,teacherId:7,semesterId:20},{grade:5,subjectId:6,teacherId:7,semesterId:20},{grade:5,subjectId:7,teacherId:7,semesterId:20}];
- const {dom,root,requests}=await setup(true,{enrollment:true,teaching,courseGroups:[{subjectName:'Drama',grade:5,teacherName:'Test Teacher',memberCount:1,active:true}]});try{
- const panel=root.querySelector('.curriculum-enrollment');await clickNamed(dom,panel,'Jetzt verwalten');await clickNamed(dom,panel,'Auswahl bestätigen');
-  assert.ok(panel.querySelector('.admin-individual-teachers'));
-  assert.ok(panel.querySelector('.admin-individual-teachers table')?.closest('.admin-table-scroll'));
-  assert.ok(panel.querySelector('.admin-course-group-summary table')?.closest('.admin-table-scroll'));
-  const gradeTeacher=panel.querySelector('.admin-individual-teachers select');assert.ok(gradeTeacher);assert.equal(gradeTeacher.value,'7');
-  const group=[...panel.querySelectorAll('select')].find(select=>[...select.options].some(option=>option.value==='RELIGION_ETHIK'));assert.ok(group);assert.equal(group.value,'RELIGION_ETHIK');
-  await clickNamed(dom,panel,'Zuordnungen laden');
-  assert.ok(panel.querySelector('.curriculum-wpf-board table')?.closest('.admin-table-scroll'));
-  let row=panel.querySelector('.curriculum-wpf-board table tr:nth-child(2)');let selects=row.querySelectorAll('select');assert.equal(row.cells.length,3);assert.equal(selects.length,1);assert.doesNotMatch(row.textContent,/Lehrkraft/);selects[0].value='6';await clickNamed(dom,panel,'Zuordnungen speichern');
-  let request=requests.filter(r=>r.url==='/assign-curriculum-wpf').at(-1);assert.deepEqual(request.data,{studentId:50,subjectId:6,classId:10,semesterId:20,assignmentGroup:'RELIGION_ETHIK',expectedSubjectId:null});
-  group.value='WPF';group.dispatchEvent(new dom.window.Event('change'));await clickNamed(dom,panel,'Zuordnungen laden');
-  row=panel.querySelector('.curriculum-wpf-board table tr:nth-child(2)');selects=row.querySelectorAll('select');assert.equal(row.cells.length,3);assert.equal(selects.length,1);assert.doesNotMatch(row.textContent,/Lehrkraft/);selects[0].value='5';await clickNamed(dom,panel,'Zuordnungen speichern');
-  request=requests.filter(r=>r.url==='/assign-curriculum-wpf').at(-1);assert.deepEqual(request.data,{studentId:50,subjectId:5,classId:10,semesterId:20,assignmentGroup:'WPF',expectedSubjectId:null});
- }finally{dom.window.close();}
-});
-test('individual canonical teacher write uses the explicit admin endpoint',async()=>{
- const {dom,root,requests}=await setup(true,{enrollment:true});try{
-  const panel=root.querySelector('.curriculum-enrollment');await clickNamed(dom,panel,'Jetzt verwalten');await clickNamed(dom,panel,'Auswahl bestätigen');
-  const select=panel.querySelector('.admin-individual-teachers select');assert.ok(select);select.value='7';
-  const save=panel.querySelector('.admin-individual-teachers button');save.click();await tick();
-  const request=requests.find(item=>item.url==='/assign-individual-grade-teacher');assert.deepEqual(request.data,{grade:5,semesterId:20,subjectId:6,teacherId:7});
- }finally{dom.window.close();}
+for (const label of [
+  'REGULAR-Fächer-Block', 'globale Lehrkraftmatrix', 'individuelle Fachgruppen',
+  'individuelle Schülerzuordnung', 'globale Aktivierungs-Picker', 'alte Semesteraktionen',
+  'alte Enrollment-Speicheraktionen', 'alte Setup-Steuerung'
+]) test(`admin curriculum no longer mounts ${label}`,async()=>{
+ const {dom,root,requests}=await setup(true,{enrollment:true,adminDashboard:true});
+ try {
+  assert.ok(root.querySelector('.central-curriculum-import'));
+  assert.equal(root.querySelector('.curriculum-enrollment'),null);
+  assert.equal(root.querySelector('.admin-regular-subject-picker'),null);
+  assert.equal(root.querySelector('.admin-individual-teachers'),null);
+  assert.equal(root.querySelector('[data-global-semester]'),null);
+  assert.equal(requests.some(r=>['/assign-grade-curriculum','/assign-individual-grade-teacher','/assign-curriculum-wpf'].includes(r.url)),false);
+ } finally {dom.window.close();}
 });
 test('teacher publishes a whole topic or individual task but has no enrollment UI',async()=>{
  const {dom,root,requests}=await setup(false,{enrollment:true,pm:{...grants(),curriculum_publish:true}});try{
@@ -879,22 +801,14 @@ test('admin dashboard keeps one semester selector and sections in the shell',asy
  const {dom,root,requests}=await setup(true,{enrollment:true,adminDashboard:true});try{
   const enrollment=dom.window.document.querySelector('#admin-enrollment');
   const central=dom.window.document.querySelector('#admin-central-curriculum');
-  assert.ok(enrollment);assert.ok(central);assert.notEqual(enrollment,central);assert.equal(dom.window.document.querySelectorAll('#curriculum').length,0);
-  assert.ok(enrollment.querySelector('.curriculum-enrollment'));
+  assert.equal(enrollment,null);assert.ok(central);assert.equal(dom.window.document.querySelectorAll('#curriculum').length,0);
   assert.ok(central.querySelector('.central-curriculum-import'));
-  assert.match(enrollment.textContent,/Neues Schulhalbjahr anlegen/);
   assert.equal(dom.window.document.querySelectorAll('#schuljahr [data-global-semester]').length,1);
-  assert.match(enrollment.textContent,/Ausgewähltes Halbjahr aktivieren/);
-  await clickNamed(dom,enrollment,'Jetzt verwalten');await clickNamed(dom,enrollment,'Auswahl bestätigen');
-  assert.match(enrollment.textContent,/Lehrkräfte-Tabelle/);
-  assert.match(enrollment.textContent,/INDIVIDUAL-Fächer und Lerngruppen/);
-  assert.doesNotMatch(enrollment.textContent,/CSV|Vorschau prüfen|Thema anlegen|Etappe anlegen/);
+  assert.equal(dom.window.document.querySelector('#schuljahr .curriculum-enrollment'),null);
   assert.match(central.textContent,/Zentrale Themen und Etappen/);
   assert.match(central.textContent,/Thema umbenennen/);
   assert.match(central.textContent,/Etappe anlegen/);
   assert.match(central.textContent,/Vorschau prüfen/);
-  assert.doesNotMatch(central.textContent,/Individuelle Fächer|Unterrichtskontext|Flexible Lehrer-Etappen|Flexible Etappe/);
-  assert.equal(requests.some(r=>r.url==='/flexible-curriculum-structure'),false);
  }finally{dom.window.close();}
 });
 

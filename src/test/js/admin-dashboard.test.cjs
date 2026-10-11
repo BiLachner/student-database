@@ -87,12 +87,13 @@ for (const [hash,section,label] of [
   }
 });
 
-test('admin dashboard uses distinct enrollment and central curriculum mountpoints',()=>{
+test('admin dashboard keeps central curriculum separate from compact enrollment controls',()=>{
   const dom=setup('#curriculum');
   try {
-    assert.ok(dom.window.document.querySelector('#admin-enrollment'));
+    assert.equal(dom.window.document.querySelector('#admin-enrollment'),null);
     assert.ok(dom.window.document.querySelector('#admin-central-curriculum'));
-    assert.notEqual(dom.window.document.querySelector('#admin-enrollment'),dom.window.document.querySelector('#admin-central-curriculum'));
+    assert.ok(dom.window.document.querySelector('#admin-tutors'));
+    assert.ok(dom.window.document.querySelector('[data-global-semester]'));
     assert.equal(dom.window.document.querySelectorAll('#curriculum').length,0);
   } finally {
     dom.window.close();

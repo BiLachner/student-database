@@ -33,6 +33,7 @@ public final class CurriculumEnrollment {
             boolean copied=previous>0 && position==2;
             if(copied) copyFrame(c,previous,created);
             if(previous>0) copyTutorFrame(c,previous,created);
+            write(c,"UPDATE school_years SET current_semester=? WHERE id=?",created,year);
             return Map.of("id",created,"label",value,"copiedFromSemesterId",previous>0?previous:0,
                     "newSchoolYear",previous==0 || position==1,"frameCopied",copied,"tutorsCopied",previous>0);
         });

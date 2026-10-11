@@ -12,7 +12,7 @@ const tick=()=>new Promise(resolve=>setTimeout(resolve,30));
 test('raw admin dashboard visibly advertises tutor assignments after enrollment',()=>{
   assert.match(dashboard,/id="admin-tutors"[^>]*>[\s\S]*Tutor:innen je Klasse/);
   assert.match(dashboard,/Tutorzuordnungen werden geladen/);
-  assert.ok(dashboard.indexOf('id="admin-enrollment"')<dashboard.indexOf('id="admin-tutors"'));
+  assert.equal(dashboard.includes('id="admin-enrollment"'),false);
 });
 
 test('javascript keeps fallback markup and fills the content area',async()=>{
@@ -23,7 +23,7 @@ test('javascript keeps fallback markup and fills the content area',async()=>{
   dom.window.eval(script); await tick();
   const block=dom.window.document.querySelector('#admin-tutors');
   assert.match(block.querySelector('h3').textContent,/Tutor:innen je Klasse/);
-  assert.match(block.querySelector('[data-tutor-status]').textContent,/1 Klassen.*1 ohne Tutor:in/);
+  assert.match(block.querySelector('[data-tutor-status]').textContent,/1 Klassen in Jahrgang 6/);
   assert.equal(block.querySelectorAll('tbody tr').length,1);
   assert.equal(block.querySelectorAll('tbody select').length,2);
   dom.window.close();

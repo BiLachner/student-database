@@ -386,6 +386,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             action(panel,'Freischaltungen laden',reload);
         }
         if(!catalog.admin || !await allowed('curriculum_manage_enrollment'))return;
+        // B4 keeps semester/tutor administration in the compact dashboard
+        // surface. The former grade/subject/setup workflow is intentionally
+        // not mounted here; subject_grade_activation remains managed by
+        // /manage_subjects.
+        if(catalog.admin)return;
         const landing=el('div');landing.className='semester-landing semester-create-panel';section.append(landing);
         const panel=el('details');panel.id='semester-setup';panel.open=true;panel.className='semester-create-panel';panel.append(el('summary','1. Schuljahr / Halbjahr'));landing.append(panel);
         const semesterForm=el('form'); semesterForm.append(el('h4','Neues Schulhalbjahr anlegen'));
@@ -908,7 +913,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         for(const node of [subject,semester,teacher,grade].filter(Boolean))node.addEventListener('change',()=>refresh().catch(showError));
         load.addEventListener('click',()=>refresh().catch(showError));await refresh().catch(showError);
         await mountCentralImport();
-        if(catalog.enrollmentEnabled)await mountEnrollment(catalog,()=>{
+        // B4 keeps admin semester/tutor controls in the compact dashboard.
+        // Never fall back to mounting the retired enrollment editor into the
+        // central curriculum mount when the legacy enrollment mount is absent.
+        if(catalog.enrollmentEnabled && (!catalog.admin || adminEnrollmentRoot))await mountEnrollment(catalog,()=>{
             const context = selectedTeacherContext();
             return teacherMode && context ? {subjectId:context.subjectId,semesterId:context.semesterId,classId:context.classId,teacherId:catalog.teacherId}
                 : {subjectId:Number(subject.value),semesterId:Number(semester.value),classId:Number(schoolClass.value),teacherId:teacher?Number(teacher.value):catalog.teacherId};
