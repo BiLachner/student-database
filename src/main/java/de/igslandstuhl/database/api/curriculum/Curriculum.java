@@ -787,7 +787,9 @@ public final class Curriculum {
             int semester = currentSemester(c);
             List<StudentSubject> result=new ArrayList<>();
             for (var row : rows(c,"SELECT DISTINCT s.id,s.name,x.grade FROM student_curriculum_contexts x "
-                    + "JOIN subjects s ON s.id=x.subject WHERE x.student=? AND x.semester=? "
+                    + "JOIN subjects s ON s.id=x.subject LEFT JOIN curriculum_subject_types st ON st.subject=x.subject "
+                    + "WHERE x.student=? AND x.semester=? "
+                    + "AND (st.mode IS NULL OR st.mode='REGULAR' OR EXISTS (SELECT 1 FROM curriculum_individual_assignments ia WHERE ia.student=x.student AND ia.semester=x.semester AND ia.assignment_group=st.assignment_group AND ia.subject=x.subject)) "
                     + "ORDER BY s.name,s.id",studentId,semester)) {
                 if (!SolSubjectPolicy.isManagedGrade(integer(row,"grade"))
                         || SolSubjectPolicy.isAllowed(c,integer(row,"grade"),integer(row,"id")))

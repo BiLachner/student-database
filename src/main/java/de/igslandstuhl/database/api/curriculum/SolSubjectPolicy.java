@@ -46,13 +46,15 @@ final class SolSubjectPolicy {
 
     private static boolean isAllowedBySubjectDefinition(Connection c, int grade, int subject) throws SQLException {
         var row = Curriculum.require(c,
-                "SELECT s.subject_code,COALESCE(t.mode,'REGULAR') AS mode,t.assignment_group "
+                "SELECT s.subject_code,t.mode,t.assignment_group "
                         + "FROM subjects s LEFT JOIN curriculum_subject_types t ON t.subject=s.id WHERE s.id=?", subject);
         String code = row.get("subject_code") == null ? null : String.valueOf(row.get("subject_code"));
-        String mode = String.valueOf(row.get("mode"));
+        String mode = row.get("mode") == null ? null : String.valueOf(row.get("mode")).strip().toUpperCase(Locale.ROOT);
         String group = row.get("assignment_group") == null ? null
                 : String.valueOf(row.get("assignment_group")).strip().toUpperCase(Locale.ROOT);
         if (code != null && CORE_CODES.contains(code)) return true;
+        if ("REGULAR".equals(mode)) return true;
+        if ("INDIVIDUAL".equals(mode) && "RELIGION_ETHIK".equals(group)) return true;
         return grade == 6 && "INDIVIDUAL".equals(mode) && WPF.equals(group);
     }
 

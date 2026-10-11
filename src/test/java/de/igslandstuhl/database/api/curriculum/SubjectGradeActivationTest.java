@@ -82,11 +82,27 @@ class SubjectGradeActivationTest {
             assertFalse(SolSubjectPolicy.isAllowed(c, 5, other));
             assertFalse(SolSubjectPolicy.isAllowed(c, 5, wpf));
             assertTrue(SolSubjectPolicy.isAllowed(c, 6, wpf));
-            assertFalse(SolSubjectPolicy.isAllowed(c, 5, religion));
-            assertFalse(SolSubjectPolicy.isAllowed(c, 6, religion));
+            assertTrue(SolSubjectPolicy.isAllowed(c, 5, religion));
+            assertTrue(SolSubjectPolicy.isAllowed(c, 6, religion));
             int german = intValue(c, "SELECT id FROM subjects WHERE subject_code='DE'");
             exec(c, "DELETE FROM subject_grade_activation WHERE subject=? AND grade=5", german);
             assertFalse(SolSubjectPolicy.isAllowed(c, 5, german));
+        }
+    }
+
+    @Test
+    void regularRequiresExplicitTypeAndActivationWhileUnknownTypeFailsClosed() throws Exception {
+        try (Connection c = database()) {
+            seed(c, false);
+            applyMigration(c);
+            exec(c, "INSERT INTO subjects(id,name) VALUES(22,'Musik'),(23,'Unklar')");
+            exec(c, "INSERT INTO curriculum_subject_types(subject,wpf,mode) VALUES(22,0,'REGULAR')");
+            exec(c, "INSERT INTO subject_grade_activation(subject,grade) VALUES(22,5),(22,6),(23,5)");
+            assertTrue(SolSubjectPolicy.isAllowed(c, 5, 22));
+            assertTrue(SolSubjectPolicy.isAllowed(c, 6, 22));
+            exec(c, "DELETE FROM subject_grade_activation WHERE subject=22 AND grade=5");
+            assertFalse(SolSubjectPolicy.isAllowed(c, 5, 22));
+            assertFalse(SolSubjectPolicy.isAllowed(c, 5, 23));
         }
     }
 

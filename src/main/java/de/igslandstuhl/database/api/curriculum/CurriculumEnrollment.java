@@ -101,8 +101,9 @@ public final class CurriculumEnrollment {
             var type=rows(c,"SELECT mode,assignment_group FROM curriculum_subject_types WHERE subject=?",subject);
             if(type.isEmpty() || !"INDIVIDUAL".equals(String.valueOf(type.get(0).get("mode"))))
                 throw error(400,"invalid_input","Nur ausdrücklich als INDIVIDUAL definierte Fächer können jahrgangsweit zugeordnet werden.");
-            String assignmentGroup=String.valueOf(type.get(0).get("assignment_group"));
-            if(!Set.of("WPF","RELIGION_ETHIK").contains(assignmentGroup))
+            String assignmentGroup=type.get(0).get("assignment_group") == null ? null
+                    : String.valueOf(type.get(0).get("assignment_group")).strip().toUpperCase(Locale.ROOT);
+            if(assignmentGroup == null || !Set.of("WPF","RELIGION_ETHIK").contains(assignmentGroup))
                 throw error(400,"invalid_input","Ungültige INDIVIDUAL-Zuordnungsgruppe.");
             SolSubjectPolicy.requireAllowed(c, grade, subject);
             write(c,"INSERT INTO curriculum_grade_teachers(semester,grade,subject,teacher) VALUES(?,?,?,?) ON CONFLICT(semester,grade,subject) DO UPDATE SET teacher=excluded.teacher",semester,grade,subject,teacher);
@@ -135,18 +136,31 @@ public final class CurriculumEnrollment {
     }
 
     private static void copyFrame(Connection c,int from,int to) throws SQLException {
+        boolean activationSchema = SubjectGradeActivationRepository.schemaAvailable(c);
+        String assignmentEligibility = activationSchema
+                ? "EXISTS (SELECT 1 FROM subject_grade_activation act JOIN curriculum_subject_types st ON st.subject=act.subject WHERE act.subject=ia.subject AND act.grade=e.grade AND st.mode='INDIVIDUAL' AND st.assignment_group=ia.assignment_group AND (st.assignment_group='RELIGION_ETHIK' OR (st.assignment_group='WPF' AND e.grade=6)))"
+                : "EXISTS (SELECT 1 FROM curriculum_subject_types st WHERE st.subject=ia.subject AND st.mode='INDIVIDUAL' AND st.assignment_group=ia.assignment_group AND (st.assignment_group='RELIGION_ETHIK' OR (st.assignment_group='WPF' AND e.grade=6)))";
+        String groupEligibility = activationSchema
+                ? "EXISTS (SELECT 1 FROM subject_grade_activation act JOIN curriculum_subject_types st ON st.subject=act.subject WHERE act.subject=cg.subject AND act.grade=cg.grade AND st.mode='INDIVIDUAL' AND (st.assignment_group='RELIGION_ETHIK' OR (st.assignment_group='WPF' AND cg.grade=6)))"
+                : "EXISTS (SELECT 1 FROM curriculum_subject_types st WHERE st.subject=cg.subject AND st.mode='INDIVIDUAL' AND (st.assignment_group='RELIGION_ETHIK' OR (st.assignment_group='WPF' AND cg.grade=6)))";
+        String contextEligibility = activationSchema
+                ? "EXISTS (SELECT 1 FROM subject_grade_activation act JOIN curriculum_subject_types st ON st.subject=act.subject WHERE act.subject=x.subject AND act.grade=x.grade AND st.mode='INDIVIDUAL' AND (st.assignment_group='RELIGION_ETHIK' OR (st.assignment_group='WPF' AND x.grade=6)))"
+                : "EXISTS (SELECT 1 FROM curriculum_subject_types st WHERE st.subject=x.subject AND st.mode='INDIVIDUAL' AND (st.assignment_group='RELIGION_ETHIK' OR (st.assignment_group='WPF' AND x.grade=6)))";
+        String teacherEligibility = activationSchema
+                ? "EXISTS (SELECT 1 FROM subject_grade_activation act JOIN curriculum_subject_types st ON st.subject=act.subject WHERE act.subject=gt.subject AND act.grade=gt.grade AND st.mode='INDIVIDUAL' AND (st.assignment_group='RELIGION_ETHIK' OR (st.assignment_group='WPF' AND gt.grade=6)))"
+                : "EXISTS (SELECT 1 FROM curriculum_subject_types st WHERE st.subject=gt.subject AND st.mode='INDIVIDUAL' AND (st.assignment_group='RELIGION_ETHIK' OR (st.assignment_group='WPF' AND gt.grade=6)))";
         for (var row : rows(c,"SELECT grade,subject FROM curriculum_grade_subjects WHERE semester=?",from)) {
             int grade=integer(row,"grade"), subject=integer(row,"subject");
             if (!SolSubjectPolicy.isManagedGrade(grade) || SolSubjectPolicy.isAllowed(c,grade,subject))
                 write(c,"INSERT INTO curriculum_grade_subjects(grade,semester,subject) VALUES(?,?,?) ON CONFLICT DO NOTHING",grade,to,subject);
         }
         write(c,"INSERT INTO curriculum_enrolled_students(student,semester,grade) SELECT student,?,grade FROM curriculum_enrolled_students WHERE semester=? ON CONFLICT DO NOTHING",to,from);
-        write(c,"INSERT INTO curriculum_individual_assignments(student,semester,assignment_group,subject) SELECT a.student,?,a.assignment_group,a.subject FROM curriculum_individual_assignments a LEFT JOIN curriculum_enrolled_students e ON e.student=a.student AND e.semester=a.semester WHERE a.semester=? AND (e.grade NOT IN (5,6) OR (e.grade=6 AND a.assignment_group='WPF')) ON CONFLICT DO NOTHING",to,from);
-        write(c,"INSERT INTO course_groups(subject,grade,semester,teacher,assignment_group,name,active) SELECT subject,grade,?,teacher,assignment_group,name,active FROM course_groups WHERE semester=? AND (grade NOT IN (5,6) OR EXISTS (SELECT 1 FROM curriculum_grade_subjects gs WHERE gs.semester=? AND gs.grade=course_groups.grade AND gs.subject=course_groups.subject) OR (grade=6 AND assignment_group='WPF')) ON CONFLICT(subject,grade,semester) DO NOTHING",to,from,to);
-        write(c,"INSERT INTO student_curriculum_contexts(student,subject,semester,teacher,class,grade,course_group) SELECT x.student,x.subject,?,x.teacher,x.class,x.grade,g.id FROM student_curriculum_contexts x LEFT JOIN course_groups g ON g.subject=x.subject AND g.grade=x.grade AND g.semester=? WHERE x.semester=? AND (x.grade NOT IN (5,6) OR EXISTS (SELECT 1 FROM curriculum_grade_subjects gs WHERE gs.semester=? AND gs.grade=x.grade AND gs.subject=x.subject) OR (x.grade=6 AND EXISTS (SELECT 1 FROM curriculum_subject_types st WHERE st.subject=x.subject AND st.mode='INDIVIDUAL' AND st.assignment_group='WPF'))) ON CONFLICT DO NOTHING",to,to,from,to);
+        write(c,"INSERT INTO curriculum_individual_assignments(student,semester,assignment_group,subject) SELECT ia.student,?,ia.assignment_group,ia.subject FROM curriculum_individual_assignments ia LEFT JOIN curriculum_enrolled_students e ON e.student=ia.student AND e.semester=ia.semester WHERE ia.semester=? AND (e.grade NOT IN (5,6) OR "+assignmentEligibility+") ON CONFLICT DO NOTHING",to,from);
+        write(c,"INSERT INTO course_groups(subject,grade,semester,teacher,assignment_group,name,active) SELECT cg.subject,cg.grade,?,cg.teacher,cg.assignment_group,cg.name,cg.active FROM course_groups cg WHERE cg.semester=? AND (cg.grade NOT IN (5,6) OR EXISTS (SELECT 1 FROM curriculum_grade_subjects gs WHERE gs.semester=? AND gs.grade=cg.grade AND gs.subject=cg.subject) OR "+groupEligibility+") ON CONFLICT(subject,grade,semester) DO NOTHING",to,from,to);
+        write(c,"INSERT INTO student_curriculum_contexts(student,subject,semester,teacher,class,grade,course_group) SELECT x.student,x.subject,?,x.teacher,x.class,x.grade,g.id FROM student_curriculum_contexts x LEFT JOIN course_groups g ON g.subject=x.subject AND g.grade=x.grade AND g.semester=? WHERE x.semester=? AND (x.grade NOT IN (5,6) OR EXISTS (SELECT 1 FROM curriculum_grade_subjects gs WHERE gs.semester=? AND gs.grade=x.grade AND gs.subject=x.subject) OR "+contextEligibility+") ON CONFLICT DO NOTHING",to,to,from,to);
         write(c,"INSERT INTO course_group_members(course_group,student) SELECT g.id,a.student FROM curriculum_individual_assignments a JOIN student_curriculum_contexts x ON x.student=a.student AND x.subject=a.subject AND x.semester=? JOIN course_groups g ON g.subject=a.subject AND g.grade=x.grade AND g.semester=? JOIN curriculum_subject_types st ON st.subject=a.subject AND st.mode='INDIVIDUAL' WHERE a.semester=? ON CONFLICT DO NOTHING",to,to,to);
         write(c,"INSERT INTO curriculum_class_teachers(semester,class,subject,teacher) SELECT ?,class,subject,teacher FROM curriculum_class_teachers ct WHERE semester=? AND (EXISTS (SELECT 1 FROM curriculum_grade_subjects gs WHERE gs.semester=? AND gs.subject=ct.subject AND gs.grade=(SELECT grade FROM classes WHERE id=ct.class)) OR NOT EXISTS (SELECT 1 FROM classes c WHERE c.id=ct.class AND c.grade IN (5,6))) ON CONFLICT DO NOTHING",to,from,to);
-        write(c,"INSERT INTO curriculum_grade_teachers(semester,grade,subject,teacher) SELECT ?,grade,subject,teacher FROM curriculum_grade_teachers gt WHERE semester=? AND (grade NOT IN (5,6) OR EXISTS (SELECT 1 FROM curriculum_grade_subjects gs WHERE gs.semester=? AND gs.grade=gt.grade AND gs.subject=gt.subject) OR (grade=6 AND EXISTS (SELECT 1 FROM curriculum_subject_types st WHERE st.subject=gt.subject AND st.mode='INDIVIDUAL' AND st.assignment_group='WPF'))) ON CONFLICT DO NOTHING",to,from,to);
+        write(c,"INSERT INTO curriculum_grade_teachers(semester,grade,subject,teacher) SELECT ?,gt.grade,gt.subject,gt.teacher FROM curriculum_grade_teachers gt WHERE gt.semester=? AND (gt.grade NOT IN (5,6) OR EXISTS (SELECT 1 FROM curriculum_grade_subjects gs WHERE gs.semester=? AND gs.grade=gt.grade AND gs.subject=gt.subject) OR "+teacherEligibility+") ON CONFLICT DO NOTHING",to,from,to);
     }
 
     private static void copyTutorFrame(Connection c,int from,int to) throws SQLException {
@@ -301,6 +315,13 @@ public final class CurriculumEnrollment {
                     && Objects.equals(current.get(0).get("assignment_group"),finalGroup)) return null;
             if(finalMode.equals("INDIVIDUAL") && number(c,"SELECT COUNT(*) FROM curriculum_grade_subjects WHERE subject=?",subject)>0)
                 throw error(409,"context_conflict","A regular grade subject cannot become individual while grade assignments exist.");
+            if(finalMode.equals("INDIVIDUAL") && SubjectGradeActivationRepository.schemaAvailable(c)) {
+                for (var activation : rows(c,"SELECT grade FROM subject_grade_activation WHERE subject=?",subject)) {
+                    int grade = integer(activation,"grade");
+                    if (!isActivationCompatible(finalGroup, grade))
+                        throw error(409,"context_conflict","Existing grade activation is incompatible with the new subject type.");
+                }
+            }
             if(finalMode.equals("REGULAR") && number(c,"SELECT COUNT(*) FROM curriculum_individual_assignments WHERE subject=?",subject)>0)
                 throw error(409,"context_conflict","Assigned individual subjects cannot become regular.");
             if(finalMode.equals("INDIVIDUAL") && number(c,"SELECT COUNT(*) FROM curriculum_individual_assignments WHERE subject=? AND assignment_group<>?",subject,finalGroup)>0)
@@ -308,6 +329,10 @@ public final class CurriculumEnrollment {
             write(c,"INSERT INTO curriculum_subject_types(subject,wpf,mode,assignment_group) VALUES(?,?,?,?) ON CONFLICT(subject) DO UPDATE SET wpf=excluded.wpf,mode=excluded.mode,assignment_group=excluded.assignment_group",subject,finalGroup!=null&&finalGroup.equals("WPF")?1:0,finalMode,finalGroup);
             return null;
         });
+    }
+    private static boolean isActivationCompatible(String assignmentGroup, int grade) {
+        if ("WPF".equals(assignmentGroup)) return grade == 6;
+        return "RELIGION_ETHIK".equals(assignmentGroup) && (grade == 5 || grade == 6);
     }
     public void removeGradeSubject(Actor actor,int grade,int semester,int subject) throws SQLException {
         admin(actor);
@@ -436,10 +461,15 @@ public final class CurriculumEnrollment {
             boolean managed=number(c,"SELECT COUNT(*) FROM curriculum_enrolled_students WHERE student=? AND semester=?",student,semester)>0;
             if(!managed)return null;
             List<Integer> result=new ArrayList<>();
-            for (var row : rows(c,"SELECT a.subject,a.grade FROM student_curriculum_contexts a LEFT JOIN curriculum_subject_types t ON t.subject=a.subject WHERE a.student=? AND a.semester=? AND (COALESCE(t.mode,'REGULAR')='REGULAR' OR EXISTS(SELECT 1 FROM curriculum_individual_assignments w WHERE w.student=a.student AND w.semester=a.semester AND w.assignment_group=t.assignment_group AND w.subject=a.subject)) ORDER BY a.subject",student,semester))
+            for (var row : rows(c,"SELECT a.subject,a.grade,t.mode,t.assignment_group FROM student_curriculum_contexts a LEFT JOIN curriculum_subject_types t ON t.subject=a.subject WHERE a.student=? AND a.semester=? ORDER BY a.subject",student,semester)) {
+                int subject = integer(row,"subject");
+                if ("INDIVIDUAL".equals(row.get("mode"))
+                        && number(c,"SELECT COUNT(*) FROM curriculum_individual_assignments WHERE student=? AND semester=? AND assignment_group=? AND subject=?",student,semester,row.get("assignment_group"),subject)==0)
+                    continue;
                 if (!SolSubjectPolicy.isManagedGrade(integer(row,"grade"))
-                        || SolSubjectPolicy.isAllowed(c,integer(row,"grade"),integer(row,"subject")))
-                    result.add(integer(row,"subject"));
+                        || SolSubjectPolicy.isAllowed(c,integer(row,"grade"),subject))
+                    result.add(subject);
+            }
             return result;
         });
     }
