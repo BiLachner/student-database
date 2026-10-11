@@ -218,7 +218,7 @@ def apply_data(db: sqlite3.Connection, m: dict) -> dict:
             typ = m["subjects"].get(name, {"wpf": 0, "mode": "REGULAR", "group": None})
             db.execute("INSERT INTO curriculum_subject_types(subject,wpf,mode,assignment_group) VALUES(?,?,?,?) ON CONFLICT(subject) DO UPDATE SET wpf=excluded.wpf,mode=excluded.mode,assignment_group=excluded.assignment_group", (subject_ids[name], typ["wpf"], typ["mode"], typ["group"]))
             db.execute("INSERT OR IGNORE INTO curriculum_grade_subjects(grade,semester,subject) VALUES(6,?,?)", (semester, subject_ids[name]))
-            db.execute("INSERT OR IGNORE INTO gradesubjects(grade,subject) VALUES(6,?)", (subject_ids[name],))
+            db.execute("INSERT OR IGNORE INTO subject_grade_activation(grade,subject) VALUES(6,?)", (subject_ids[name],))
 
         # The DEMO currently has no grade-5 student accounts.  Keep the
         # fachliche frame and religion/ethics groups available without
@@ -226,7 +226,7 @@ def apply_data(db: sqlite3.Connection, m: dict) -> dict:
         grade5_individual = [name for name in sorted(individual) if m["subjects"].get(name, {}).get("group") == "RELIGION_ETHIK"]
         for name in all_subjects:
             db.execute("INSERT OR IGNORE INTO curriculum_grade_subjects(grade,semester,subject) VALUES(5,?,?)", (semester, subject_ids[name]))
-            db.execute("INSERT OR IGNORE INTO gradesubjects(grade,subject) VALUES(5,?)", (subject_ids[name],))
+            db.execute("INSERT OR IGNORE INTO subject_grade_activation(grade,subject) VALUES(5,?)", (subject_ids[name],))
             if name in grade5_individual:
                 teacher = teacher_ids[INDIVIDUAL_TEACHER.get(name, "Leni.Lehrerin")]
                 db.execute("INSERT INTO curriculum_grade_teachers(semester,grade,subject,teacher) VALUES(?,?,?,?) ON CONFLICT(semester,grade,subject) DO UPDATE SET teacher=excluded.teacher", (semester,5,subject_ids[name],teacher))
@@ -318,7 +318,6 @@ def apply_data(db: sqlite3.Connection, m: dict) -> dict:
                     db.execute("INSERT OR IGNORE INTO course_group_members(course_group,student) VALUES(?,?)", (group,student["id"]))
             db.execute("INSERT INTO curriculum_individual_assignments(student,semester,assignment_group,subject) VALUES(?,?,?,?) ON CONFLICT(student,semester,assignment_group) DO UPDATE SET subject=excluded.subject", (student["id"],semester,"WPF",subject_ids[wpf[index % len(wpf)]]))
             db.execute("INSERT INTO curriculum_individual_assignments(student,semester,assignment_group,subject) VALUES(?,?,?,?) ON CONFLICT(student,semester,assignment_group) DO UPDATE SET subject=excluded.subject", (student["id"],semester,"RELIGION_ETHIK",subject_ids[religion[index % len(religion)]]))
-            db.execute("INSERT INTO curriculum_wpf_assignments(student,semester,subject) VALUES(?,?,?) ON CONFLICT(student,semester) DO UPDATE SET subject=excluded.subject", (student["id"],semester,subject_ids[wpf[index % len(wpf)]]))
 
         # Source releases are mapped by subject/class and never by PROD teacher ID.
         for rel in m["central_releases"]:
