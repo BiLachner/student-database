@@ -13,6 +13,7 @@ import de.igslandstuhl.database.Registry;
 import de.igslandstuhl.database.api.User;
 import de.igslandstuhl.database.server.resources.ResourceLocation;
 import de.igslandstuhl.database.server.webserver.access.AccessLevel;
+import de.igslandstuhl.database.server.webserver.handlers.PostRequestHandler;
 import de.igslandstuhl.database.server.webserver.handlers.WebResourceHandler;
 import de.igslandstuhl.database.server.webserver.requests.RequestType;
 
@@ -20,6 +21,7 @@ class StaticTutorResourcePathsTest {
     @BeforeAll
     static void registerWebPaths() throws IOException {
         WebPath.registerPaths();
+        PostRequestHandler.getInstance().registerHandlers();
     }
 
     @Test
@@ -42,6 +44,20 @@ class StaticTutorResourcePathsTest {
                 "site", "curriculum.js");
         assertPath("/student-individual-matrix.js", "admin", AccessLevel.ADMIN,
                 "admin", "student-individual-matrix.js");
+    }
+
+    @Test
+    void individualAssignmentApisAreRegisteredAsAdminPostHandlers() {
+        for (String path : new String[]{
+                "/curriculum-individual-student-matrix",
+                "/assign-curriculum-individual-subject"}) {
+            WebPath webPath = Registry.webPathRegistry().get(WebPath.PathInfo.get(path, RequestType.POST));
+            assertNotNull(webPath, path + " must be registered");
+            assertEquals(RequestType.POST, webPath.type());
+            assertEquals("PostRequestHandler", webPath.handlerType());
+            assertEquals(AccessLevel.ADMIN, webPath.accessLevel());
+            assertNotNull(Registry.postRequestHandlerRegistry().get(path), path + " handler must be registered");
+        }
     }
 
     private static void assertPath(String path, String namespace, AccessLevel accessLevel,
