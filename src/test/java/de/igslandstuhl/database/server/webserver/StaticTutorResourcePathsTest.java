@@ -34,6 +34,16 @@ class StaticTutorResourcePathsTest {
                 "admin", "tutor-assignments.js");
     }
 
+    @Test
+    void dashboardJavascriptResourcesUseTheirRegisteredResourceSemantics() {
+        assertPath("/admin-dashboard.js", "admin", AccessLevel.ADMIN,
+                "admin", "admin-dashboard.js");
+        assertPath("/curriculum.js", "site", AccessLevel.TEACHER,
+                "site", "curriculum.js");
+        assertPath("/student-individual-matrix.js", "admin", AccessLevel.ADMIN,
+                "admin", "student-individual-matrix.js");
+    }
+
     private static void assertPath(String path, String namespace, AccessLevel accessLevel,
             String expectedResourceNamespace, String expectedResourceName) {
         WebPath webPath = Registry.webPathRegistry().get(WebPath.PathInfo.get(path, RequestType.GET));
