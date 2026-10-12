@@ -716,7 +716,14 @@ function curriculumStageLabel(task) {
     const level = curriculumLevelLabel(task.niveau);
     const levelText = level ? ` · ${level}` : '';
     const activeText = task.inProgress ? ' · Aktive Etappe' : '';
-    return `${stage}${topic}${decodeEntities(task.name || '')} · ${task.tokens ?? 0} Münzen${levelText}${activeText}`;
+    const maximum = task.tokens ?? 0;
+    const unit = Number(maximum) === 1 ? 'Münze' : 'Münzen';
+    const coinText = task.variableTokens === true
+        ? task.completed === true
+            ? `${task.awardedTokens ?? maximum} von ${maximum} ${unit}`
+            : `bis zu ${maximum} ${unit}`
+        : `${maximum} ${unit}`;
+    return `${stage}${topic}${decodeEntities(task.name || '')} · ${coinText}${levelText}${activeText}`;
 }
 function appendCurriculumStageSection(body, title, tasks, onClick) {
     if (!Array.isArray(tasks) || tasks.length === 0) return;

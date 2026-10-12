@@ -113,6 +113,27 @@ test('managed flexible stages use their activation and cancellation endpoints',a
   } finally { dom.window.close(); }
 });
 
+test('student flexible stages explain maximum and effective award values',async()=>{
+  const {dom,subject}=setup({catalog:{
+    activeStage:null,centralTasks:[],
+    flexibleTasks:[
+      {id:9,name:'Offene variable Etappe',tokens:4,variableTokens:true,active:true,completed:false,inProgress:false},
+      {id:10,name:'Variable Leistung',tokens:4,variableTokens:true,awardedTokens:2,active:true,completed:true,inProgress:false},
+      {id:11,name:'Feste Leistung',tokens:4,variableTokens:false,awardedTokens:4,active:true,completed:true,inProgress:false}
+    ]
+  }});
+  try {
+    const panel=dom.window.createSubjectPanel(subject,dom.window.studentData,false,new Set([subject.id]));
+    dom.window.document.body.appendChild(panel);await openPanel(dom,panel);
+    const flexibleHeading=[...panel.querySelectorAll('h4')].find(node=>node.textContent==='Freigegebene flexible Etappen:');
+    const openText=flexibleHeading.nextElementSibling.textContent;
+    assert.match(openText,/Offene variable Etappe.*bis zu 4 Münzen/);
+    const completedHeading=[...panel.querySelectorAll('h4')].find(node=>node.textContent==='Abgeschlossene Etappen:');
+    assert.match(completedHeading.nextElementSibling.textContent,/Variable Leistung.*2 von 4 Münzen/);
+    assert.match(completedHeading.nextElementSibling.textContent,/Feste Leistung.*4 Münzen/);
+  } finally { dom.window.close(); }
+});
+
 test('managed catalog errors are shown without falling into the legacy renderer',async()=>{
   const {dom,requests,subject,consoleErrors}=setup({catalogError:{status:500,body:{error:'internal',message:'Katalog nicht verfügbar'}}});
   try {
