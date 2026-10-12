@@ -40,7 +40,12 @@ public final class Curriculum {
         }
     }
     public record FlexibleTask(int id, int ownerTeacher, int subjectId, int classId, int semesterId,
-                               int grade, String name, int tokens) {
+                               int grade, String name, int tokens, boolean variableTokens) {
+        /** Compatibility constructor for callers that predate variable awards. */
+        public FlexibleTask(int id, int ownerTeacher, int subjectId, int classId, int semesterId,
+                            int grade, String name, int tokens) {
+            this(id, ownerTeacher, subjectId, classId, semesterId, grade, name, tokens, false);
+        }
         Scope scope() { return new Scope(ownerTeacher, subjectId, classId, semesterId); }
     }
     public enum ActiveStageType { CENTRAL, FLEXIBLE }
@@ -499,7 +504,7 @@ public final class Curriculum {
             return (int)number(c,"SELECT last_insert_rowid()");});
     }
     private static FlexibleTask task(Map<String,Object> r) {
-        return new FlexibleTask(integer(r,"id"),integer(r,"owner_teacher"),integer(r,"subject"),integer(r,"class"),integer(r,"semester"),integer(r,"grade"),(String)r.get("name"),integer(r,"tokens"));
+        return new FlexibleTask(integer(r,"id"),integer(r,"owner_teacher"),integer(r,"subject"),integer(r,"class"),integer(r,"semester"),integer(r,"grade"),(String)r.get("name"),integer(r,"tokens"),integer(r,"variable_tokens") != 0);
     }
     public List<FlexibleTask> list(Actor actor,Scope scope) throws SQLException {
         return transaction(c->{authorize(c,actor,scope,false);boolean individual=individualSubject(c,scope.subjectId());
@@ -1274,20 +1279,25 @@ public final class Curriculum {
             this(id, name, tokens, niveau, 0, topicId, topicName);
         }
     }
-    public record CompletedFlexibleTask(int id, String name, int tokens) {}
+    public record CompletedFlexibleTask(int id, String name, int tokens, Integer awardedTokens) {
+        /** Compatibility constructor for callers that predate awarded completion values. */
+        public CompletedFlexibleTask(int id, String name, int tokens) {
+            this(id, name, tokens, null);
+        }
+    }
 
     private static List<CompletedFlexibleTask> completedFlexibleTasks(Connection c,int studentId,Scope scope) throws SQLException {
         boolean individual=individualSubject(c,scope.subjectId());
         String contextFilter=individual
                 ? "t.course_group=? AND EXISTS (SELECT 1 FROM course_group_members gm WHERE gm.course_group=t.course_group AND gm.student=x.student)"
                 : "t.owner_teacher=? AND t.class=?";
-        String sql="SELECT t.id,t.name,t.tokens FROM flexible_tasks t JOIN completed_flexible_tasks x ON x.flexible_task=t.id "
+        String sql="SELECT t.id,t.name,t.tokens,x.awarded_tokens FROM flexible_tasks t JOIN completed_flexible_tasks x ON x.flexible_task=t.id "
                 +"WHERE x.student=? AND t.subject=? AND t.semester=? AND "+contextFilter+" AND "+ACTIVE_COMPLETION+" ORDER BY t.id";
         Object[] args=individual
                 ? new Object[]{studentId,scope.subjectId(),scope.semesterId(),resolveScope(c,scope).courseGroupId()}
                 : new Object[]{studentId,scope.subjectId(),scope.semesterId(),scope.teacherId(),scope.classId()};
         return rows(c,sql,args).stream()
-                .map(r->new CompletedFlexibleTask(integer(r,"id"),(String)r.get("name"),integer(r,"tokens"))).toList();
+                .map(r->new CompletedFlexibleTask(integer(r,"id"),(String)r.get("name"),integer(r,"tokens"),r.get("awarded_tokens") == null ? null : integer(r,"awarded_tokens"))).toList();
     }
     private static long flexibleCompleted(Connection c,int studentId,Scope scope) throws SQLException {
         return completedFlexibleTasks(c,studentId,scope).stream().mapToLong(CompletedFlexibleTask::tokens).sum();
@@ -1300,11 +1310,15 @@ public final class Curriculum {
                 studentId,scope.subjectId(),grade,scope.semesterId()).stream()
                 .map(r->new CompletedCentralTask(integer(r,"id"),(String)r.get("name"),integer(r,"tokens"),integer(r,"niveau"),integer(r,"stageNumber"),integer(r,"topicId"),(String)r.get("topicName"))).toList();
         List<CompletedFlexibleTask> completedFlexibleTasks=completedFlexibleTasks(c,studentId,scope);
+        // Phase 2 stores the raw nullable award but keeps the existing public contract;
+        // award-aware response fields belong to the later read-model phase.
+        List<CompletedFlexibleTask> responseCompletedFlexibleTasks=completedFlexibleTasks.stream()
+                .map(task->new CompletedFlexibleTask(task.id(),task.name(),task.tokens())).toList();
         // Totals are derived from the exact returned identities in this transaction, never a second query/cache.
         long central=completedCentralTasks.stream().mapToLong(CompletedCentralTask::tokens).sum();
         long flexible=completedFlexibleTasks.stream().mapToLong(CompletedFlexibleTask::tokens).sum();
         return Map.of("semesterId",scope.semesterId(),"centralTokens",central,"flexibleTokens",flexible,"totalTokens",central+flexible,
-                "completedCentralTasks",completedCentralTasks,"completedFlexibleTasks",completedFlexibleTasks);
+                "completedCentralTasks",completedCentralTasks,"completedFlexibleTasks",responseCompletedFlexibleTasks);
     }
     /** Tutor-only read model built from the same completion and stage read models as normal progress. */
     public Map<String,Object> weeklyConversationOverview(Actor actor,int semester,int classId) throws SQLException {

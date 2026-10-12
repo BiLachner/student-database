@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS flexible_tasks (
     grade INTEGER NOT NULL,
     name TEXT NOT NULL CHECK(length(trim(name)) BETWEEN 1 AND 200),
     tokens INTEGER NOT NULL CHECK(tokens BETWEEN 0 AND 105),
+    variable_tokens INTEGER NOT NULL DEFAULT 0 CHECK(variable_tokens IN (0, 1)),
     course_group INTEGER REFERENCES course_groups(id),
     UNIQUE(owner_teacher, subject, class, semester, name)
 );
