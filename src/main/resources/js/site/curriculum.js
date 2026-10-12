@@ -36,6 +36,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 context_unassigned: 'Für dieses Fach und Halbjahr ist noch kein Unterrichtskontext zugewiesen.',
                 context_conflict: 'Die Zuordnung oder Leistungsübernahme passt nicht zum aktuellen Stand. Bitte Vorschau aktualisieren und alle Abschlüsse gleichwertig zuordnen.',
                 invalid_input: 'Bitte die Eingaben prüfen.',
+                completion_award_conflict: 'Diese Leistung hat bereits eine andere Münzzahl. Setze die Bewertung zuerst auf „Noch nicht bewertet“ zurück.',
+                completion_history_conflict: 'Die Münzart oder maximale Münzzahl kann nicht geändert werden, weil für diese Etappe bereits Leistungen vorliegen.',
                 not_found: 'Der angefragte Eintrag wurde nicht gefunden.',
                 conflict: 'Die Änderung steht im Konflikt mit vorhandenen Daten. Bitte Kontext, Namen und Halbjahr prüfen und aktualisieren.',
                 budget_exceeded: 'Die Grenze von 105 Münzen würde überschritten.'
@@ -221,7 +223,12 @@ document.addEventListener('DOMContentLoaded', async () => {
                 tr.insertCell().textContent = stage.topicName || 'Ohne Thema';
                 tr.insertCell().textContent = `${stage.name || ''}${stage.type === 'CENTRAL' && niveauText(stage.niveau) ? ` · ${niveauText(stage.niveau)}` : ''}`;
                 tr.insertCell().textContent = stage.type === 'CENTRAL' ? 'Zentral' : stage.type === 'FLEXIBLE' ? 'Flexibel' : '';
-                tr.insertCell().textContent = String(stage.tokens ?? 0);
+                const maximumTokens = Number(stage.tokens ?? 0);
+                const variableTokens = stage.type === 'FLEXIBLE' && stage.variableTokens === true;
+                const earnedTokens = Number.isSafeInteger(stage.awardedTokens) ? stage.awardedTokens : null;
+                const tokenCell = tr.insertCell();
+                tokenCell.textContent = variableTokens && stage.status === 'PASSED' && earnedTokens != null
+                    ? `${earnedTokens} von ${maximumTokens} Münzen` : String(stage.tokens ?? 0);
                 const assessmentCell=tr.insertCell();assessmentCell.append(el('span',assessmentText(stage.status)));
                 if(canAssess && (stage.type==='CENTRAL'||stage.type==='FLEXIBLE')) {
                     const control=el('select');control.className='assessment-control';control.dataset.stageType=stage.type;control.dataset.stageId=stage.stageId;
@@ -229,33 +236,64 @@ document.addEventListener('DOMContentLoaded', async () => {
                     for(const [value,label] of assessmentOptions){const option=el('option',label);option.value=value;control.append(option);}
                     control.value=stage.status||'UNASSESSED';
                     let previousValue = stage.status || 'UNASSESSED';
-                    const saveAssessment = async () => {
+                    let awardEditor = null;
+                    const clearAwardEditor = () => { awardEditor?.remove(); awardEditor = null; };
+                    const showAwardEditor = () => {
+                        clearAwardEditor();
+                        const wrapper = el('div'); wrapper.className = 'teacher-variable-award-editor';
+                        const label = el('label', `Verdiente Münzen (maximal ${maximumTokens}) `);
+                        const input = el('input'); input.type = 'number'; input.name = 'awardedTokens'; input.step = '1'; input.min = '1'; input.max = String(maximumTokens);
+                        input.setAttribute('aria-label', `Verdiente Münzen, maximal ${maximumTokens}`);
+                        const saveButton = el('button', 'Speichern'); saveButton.type = 'button';
+                        const error = el('p'); error.className = 'teacher-variable-award-error'; error.setAttribute('role', 'alert');
+                        label.append(input); wrapper.append(label, saveButton, error); assessmentCell.append(wrapper); awardEditor = wrapper;
+                        saveButton.addEventListener('click', () => {
+                            const value = Number(input.value);
+                            if (!Number.isInteger(value) || value < 1 || value > maximumTokens) {
+                                error.textContent = `Bitte eine ganze Zahl zwischen 1 und ${maximumTokens} eingeben.`;
+                                input.focus(); return;
+                            }
+                            saveAssessment(value, saveButton).catch(() => {});
+                        });
+                        input.focus();
+                    };
+                    if (variableTokens && stage.status === 'PASSED' && earnedTokens != null) {
+                        const hint = el('span', ' Zum Ändern zuerst „Noch nicht bewertet“ wählen.'); hint.className = 'teacher-variable-award-hint'; assessmentCell.append(hint);
+                    }
+                    const saveAssessment = async (awardedTokens, saveButton = null) => {
                         const key=`${stage.type}:${stage.stageId}`;
                         if(assessmentWrites.has(key))return;
                         const nextValue = control.value;
                         const viewState = captureDetailViewState(control);
-                        assessmentWrites.add(key);control.disabled=true;detailStatus.style.color='';detailStatus.textContent='Wird gespeichert …';
+                        assessmentWrites.add(key);control.disabled=true;if(saveButton)saveButton.disabled=true;detailStatus.style.color='';detailStatus.textContent='Wird gespeichert …';
                         try {
                             if(!await allowed('curriculum_assess_students'))throw Error(permissionDenied);
                             const context=selectedContext();
                             if(!context||selectedStudentId!==detail.studentId)throw Error('Die Auswahl wurde geändert. Bitte Details neu öffnen.');
-                            await post('/set-curriculum-stage-assessment',{
+                            const payload = {
                                 studentId:detail.studentId,subjectId:context.subjectId,classId:context.classId,semesterId:context.semesterId,
                                 stageType:stage.type,stageId:stage.stageId,status:control.value
-                            });
+                            };
+                            if (variableTokens && control.value === 'PASSED') payload.awardedTokens = awardedTokens;
+                            await post('/set-curriculum-stage-assessment', payload);
                             detailStatus.textContent='Gespeichert';
                             previousValue = nextValue;
+                            clearAwardEditor();
                             await loadRoster();
                             restoreDetailViewState(viewState);
                         } catch(error) {
                             control.value=previousValue;
-                            detailStatus.textContent='Speichern fehlgeschlagen';detailStatus.style.color='darkred';
+                            detailStatus.textContent=`Speichern fehlgeschlagen: ${error.message}`;detailStatus.style.color='darkred';
                             restoreDetailViewState(viewState);
                         } finally {
-                            assessmentWrites.delete(key);control.disabled=false;
+                            assessmentWrites.delete(key);control.disabled=false;if(saveButton)saveButton.disabled=false;
                         }
                     };
-                    control.addEventListener('change', saveAssessment);
+                    control.addEventListener('change', () => {
+                        if (variableTokens && control.value === 'PASSED' && stage.status !== 'PASSED') { showAwardEditor(); return; }
+                        clearAwardEditor();
+                        saveAssessment().catch(() => {});
+                    });
                     assessmentCell.append(document.createElement('br'),control);
                 }
                 tr.insertCell().textContent = stage.earned === true ? 'Ja' : '—';
@@ -346,6 +384,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     function field(form, label, value, type = 'text') {
         const wrapper = el('label', label + ' '), input = el('input'); input.type = type; input.value = value; input.required = true;
         if (type === 'number') { input.min = 0; input.max = 105; input.step = 1; } else input.maxLength = 200;
+        wrapper.append(input); form.append(wrapper); return input;
+    }
+    function checkboxField(form, label, checked = false) {
+        const wrapper = el('label', label + ' '), input = el('input'); input.type = 'checkbox'; input.checked = checked === true; input.name = 'variableTokens';
         wrapper.append(input); form.append(wrapper); return input;
     }
     function button(form, text) { const b = el('button', text); b.type = 'submit'; form.append(b); return b; }
@@ -712,12 +754,14 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
             function editTask(parent, task, isFlexible) {
                 const form = el('form'), name = field(form,'Name',task.name), tokens = field(form,'Münzen',task.tokens,'number');
+                const variable = isFlexible ? checkboxField(form,'Variable Münzvergabe',task.variableTokens === true) : null;
                 const topic = isFlexible ? topicField(form, task.topicId) : null;
                 button(form,'Speichern');
                 form.addEventListener('submit', async event => {event.preventDefault();try {
                     const base = isFlexible ? budget.totalTokens : structure.centralTokens;
                     if (base-task.tokens+Number(tokens.value)>105) throw Error('Die Summe darf 105 Münzen nicht überschreiten.');
-                    await save(isFlexible?'/edit-flexible-task':'/edit-task',{taskId:task.id,name:name.value,tokens:Number(tokens.value),...(isFlexible?{topicId:topic.value?Number(topic.value):null}:{})});
+                    if (isFlexible && variable.checked && Number(tokens.value) < 1) throw Error('Eine variable Etappe benötigt mindestens 1 Münze.');
+                    await save(isFlexible?'/edit-flexible-task':'/edit-task',{taskId:task.id,name:name.value,tokens:Number(tokens.value),...(isFlexible?{variableTokens:variable.checked,topicId:topic.value?Number(topic.value):null}:{})});
                 } catch(error){showError(error);} });parent.append(form);
             }
             async function deleteFlexibleTask(task) {
@@ -803,10 +847,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                 central.append(el('p','Flexible Münzen sind geplant. Verdient werden sie erst durch bestätigte Abschlüsse.'));
                 const topicForm=el('form'),topicName=field(topicForm,'Neues flexibles Thema','');button(topicForm,'Flexibles Thema anlegen');central.append(topicForm);
                 topicForm.addEventListener('submit',async e=>{e.preventDefault();try{await save('/add-flexible-topic',{...scope,name:topicName.value});}catch(error){showError(error);}});
-                const form=el('form'), name=field(form,'Neue flexible Etappe',''), tokens=field(form,'Münzen',0,'number'), topic=topicField(form,null);button(form,'Flexible Etappe anlegen');central.append(form);
+                const form=el('form'), name=field(form,'Neue flexible Etappe',''), tokens=field(form,'Münzen',0,'number'), variable=checkboxField(form,'Variable Münzvergabe'), topic=topicField(form,null);button(form,'Flexible Etappe anlegen');central.append(form);
                 form.addEventListener('submit',async e=>{e.preventDefault();try{
                     if(budget.totalTokens+Number(tokens.value)>105)throw Error('Dieses Unterrichtsbudget würde 105 überschreiten.');
-                    await save('/add-flexible-task',{...scope,name:name.value,tokens:Number(tokens.value),topicId:topic.value?Number(topic.value):null});
+                    if (variable.checked && Number(tokens.value) < 1) throw Error('Eine variable Etappe benötigt mindestens 1 Münze.');
+                    await save('/add-flexible-task',{...scope,name:name.value,tokens:Number(tokens.value),variableTokens:variable.checked,topicId:topic.value?Number(topic.value):null});
                 }catch(error){showError(error);}});
                 return;
             }
@@ -899,10 +944,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (!manageFlexible) return;
             const topicForm=el('form'),topicName=field(topicForm,'Neues flexibles Thema','');button(topicForm,'Flexibles Thema anlegen');flexible.append(topicForm);
             topicForm.addEventListener('submit',async e=>{e.preventDefault();try{await save('/add-flexible-topic',{...scope,name:topicName.value});}catch(error){showError(error);}});
-            const form=el('form'), name=field(form,'Neue flexible Etappe',''), tokens=field(form,'Münzen',0,'number'), topic=topicField(form,null);button(form,'Flexible Etappe anlegen');flexible.append(form);
+            const form=el('form'), name=field(form,'Neue flexible Etappe',''), tokens=field(form,'Münzen',0,'number'), variable=checkboxField(form,'Variable Münzvergabe'), topic=topicField(form,null);button(form,'Flexible Etappe anlegen');flexible.append(form);
             form.addEventListener('submit',async e=>{e.preventDefault();try{
                 if(budget.totalTokens+Number(tokens.value)>105)throw Error('Dieses Unterrichtsbudget würde 105 überschreiten.');
-                await save('/add-flexible-task',{...scope,name:name.value,tokens:Number(tokens.value),topicId:topic.value?Number(topic.value):null});
+                if (variable.checked && Number(tokens.value) < 1) throw Error('Eine variable Etappe benötigt mindestens 1 Münze.');
+                await save('/add-flexible-task',{...scope,name:name.value,tokens:Number(tokens.value),variableTokens:variable.checked,topicId:topic.value?Number(topic.value):null});
             }catch(error){showError(error);}});
         }
         reloadCurriculum = refresh;

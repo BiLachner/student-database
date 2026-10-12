@@ -106,10 +106,10 @@ async function setup(admin, options={}){
    if(data.tokens>70){ok=false;body={error:'budget_exceeded',message:'Budget exceeded',affectedContexts:[{teacherId:7,classId:10,semesterId:20,centralTokens:data.tokens,flexibleTokens:35,totalTokens:data.tokens+35}]};}
    else{centralName=data.name;centralTokens=data.tokens;const task=centralTasks.find(item=>item.id===data.taskId);if(task){task.name=data.name;task.tokens=data.tokens;}body={ok:true};}
   }
-  else if(url==='/add-flexible-task'){tasks.push({id:101,name:data.name,tokens:data.tokens,topicId:data.topicId});byClass.set(data.classId,tasks);body=tasks.at(-1);releaseFlexibleTasks.push({id:body.id,name:body.name,topicId:body.topicId??null,active:false});}
+  else if(url==='/add-flexible-task'){tasks.push({id:101,name:data.name,tokens:data.tokens,variableTokens:data.variableTokens===true,topicId:data.topicId});byClass.set(data.classId,tasks);body=tasks.at(-1);releaseFlexibleTasks.push({id:body.id,name:body.name,topicId:body.topicId??null,active:false});}
   else if(url==='/add-curriculum-task'){const task={id:301,topic:data.topicId,name:data.name,tokens:data.tokens,stageNumber:data.stageNumber};centralTasks.push(task);centralName=data.name;centralTokens+=data.tokens;body={id:task.id};}
   else if(url==='/add-curriculum-topic'){const topic={id:9,name:data.name,number:data.number};centralTopics.push(topic);body={id:topic.id};}
-  else if(url==='/edit-flexible-task'){const task=[...byClass.values()].flat().find(t=>t.id===data.taskId);Object.assign(task,{name:data.name,tokens:data.tokens,topicId:data.topicId});body=task;}
+  else if(url==='/edit-flexible-task'){const task=[...byClass.values()].flat().find(t=>t.id===data.taskId);Object.assign(task,{name:data.name,tokens:data.tokens,variableTokens:data.variableTokens===true,topicId:data.topicId});body=task;}
   else throw Error('Unexpected endpoint '+url);
   return {ok,status:ok?200:409,text:async()=>JSON.stringify(body)};
  };
@@ -455,6 +455,72 @@ test('assessment double click sends once and unsafe server errors stay text only
   const control=progress.querySelector('.assessment-control');control.value='LOCKED';control.dispatchEvent(new env.dom.window.Event('change'));await tick();
   assert.equal(progress.querySelectorAll('script').length,0);assert.doesNotMatch(progress.textContent,/stacktrace|alert\(1\)/);assert.match(progress.textContent,/Speichern fehlgeschlagen/);
  }finally{env.dom.window.close();}
+});
+test('flexible task create exposes variable award checkbox and sends explicit mode',async()=>{
+ const env=await setup(false,{plannedFlexibleTasks:[],plannedFlexibleTopics:[]});
+ try {
+  const form=formWith(env.root,'Flexible Etappe anlegen');
+  const checkbox=form.querySelector('input[type=checkbox][name=variableTokens]');
+  assert.ok(checkbox);assert.equal(checkbox.checked,false);
+  form.querySelector('input[type=text]').value='Variable';form.querySelector('input[type=number]').value='4';checkbox.checked=true;
+  await submit(env.dom,form);
+  const request=env.requests.find(item=>item.url==='/add-flexible-task');
+  assert.equal(request.data.variableTokens,true);assert.equal(request.data.tokens,4);
+ } finally {env.dom.window.close();}
+});
+test('variable flexible task creation blocks zero maximum in the client',async()=>{
+ const env=await setup(false,{plannedFlexibleTasks:[],plannedFlexibleTopics:[]});
+ try {
+  const form=formWith(env.root,'Flexible Etappe anlegen');form.querySelector('input[type=checkbox]').checked=true;form.querySelector('input[type=number]').value='0';
+  await submit(env.dom,form);
+  assert.equal(env.requests.some(item=>item.url==='/add-flexible-task'),false);
+  assert.match(env.root.textContent,/mindestens 1 Münze/);
+ } finally {env.dom.window.close();}
+});
+test('flexible task edit loads and submits variable mode and preserves conflict form state',async()=>{
+ const env=await setup(false,{plannedFlexibleTasks:[{id:100,name:'Variable',tokens:4,variableTokens:true,topicId:null}],plannedFlexibleTopics:[],response:{url:'/edit-flexible-task',status:409,body:JSON.stringify({error:'completion_history_conflict'})}});
+ try {
+  const form=formWith(env.root,'Speichern');const checkbox=form.querySelector('input[type=checkbox][name=variableTokens]');
+  assert.equal(checkbox.checked,true);checkbox.checked=false;form.querySelector('input[type=text]').value='Edited';await submit(env.dom,form);
+  assert.equal(checkbox.checked,false);assert.equal(form.querySelector('input[type=text]').value,'Edited');
+  assert.match(env.root.textContent,/Münzart oder maximale Münzzahl/);
+ } finally {env.dom.window.close();}
+});
+test('variable PASSED waits for explicit award save and sends bounded integer',async()=>{
+ const detail={studentId:50,studentName:'Ada Alpha',stages:[{type:'FLEXIBLE',stageId:100,name:'Variable',tokens:4,variableTokens:true,status:null,earned:false,inProgress:true}]};
+ const env=await setup(false,{progress:true,detail,pm:{...grants(),curriculum_assess_students:true},assessmentHandler:data=>({status:data.status,earned:data.status==='PASSED',awardedTokens:data.awardedTokens??null})});
+ try {
+  const progress=env.dom.window.document.querySelector('#student-progress');[...progress.querySelectorAll('button')].find(button=>button.textContent==='Details').click();await tick();
+  const control=progress.querySelector('.assessment-control');control.value='PASSED';control.dispatchEvent(new env.dom.window.Event('change'));await tick();
+  assert.equal(env.requests.some(item=>item.url==='/set-curriculum-stage-assessment'),false);
+  const input=progress.querySelector('input[name=awardedTokens]');assert.ok(input);assert.equal(input.min,'1');assert.equal(input.max,'4');assert.equal(input.step,'1');assert.equal(input.value,'');
+  input.value='2';progress.querySelector('.teacher-variable-award-editor button').click();await tick();await tick();
+  const request=env.requests.find(item=>item.url==='/set-curriculum-stage-assessment');assert.equal(request.data.status,'PASSED');assert.equal(request.data.awardedTokens,2);
+ } finally {env.dom.window.close();}
+});
+test('variable award client validation rejects blank, zero and over maximum without writes',async()=>{
+ const detail={studentId:50,studentName:'Ada Alpha',stages:[{type:'FLEXIBLE',stageId:100,name:'Variable',tokens:4,variableTokens:true,status:null,earned:false,inProgress:true}]};
+ const env=await setup(false,{progress:true,detail,pm:{...grants(),curriculum_assess_students:true}});
+ try {
+  const progress=env.dom.window.document.querySelector('#student-progress');[...progress.querySelectorAll('button')].find(button=>button.textContent==='Details').click();await tick();
+  const control=progress.querySelector('.assessment-control');control.value='PASSED';control.dispatchEvent(new env.dom.window.Event('change'));await tick();
+  const input=progress.querySelector('input[name=awardedTokens]'),save=progress.querySelector('.teacher-variable-award-editor button');
+  for(const value of ['', '0', '5', '2.5']) {input.value=value;save.click();await tick();assert.equal(env.requests.some(item=>item.url==='/set-curriculum-stage-assessment'),false);}
+  assert.match(progress.textContent,/ganze Zahl zwischen 1 und 4/);
+ } finally {env.dom.window.close();}
+});
+test('completed variable award displays earned value and reset permits a fresh award',async()=>{
+ let status='PASSED',award=2;
+ const detailHandler=()=>({studentId:50,studentName:'Ada Alpha',stages:[{type:'FLEXIBLE',stageId:100,name:'Variable',tokens:4,variableTokens:true,status,awardedTokens:status==='PASSED'?award:null,earned:status==='PASSED',inProgress:false}]});
+ const env=await setup(false,{progress:true,detailHandler,pm:{...grants(),curriculum_assess_students:true},assessmentHandler:data=>{status=data.status;if(data.awardedTokens!=null)award=data.awardedTokens;return {status,earned:status==='PASSED',awardedTokens:status==='PASSED'?award:null};}});
+ try {
+  const progress=env.dom.window.document.querySelector('#student-progress');[...progress.querySelectorAll('button')].find(button=>button.textContent==='Details').click();await tick();
+  assert.match(progress.textContent,/2 von 4 Münzen/);assert.equal(progress.querySelector('input[name=awardedTokens]'),null);
+  let control=progress.querySelector('.assessment-control');control.value='UNASSESSED';control.dispatchEvent(new env.dom.window.Event('change'));await tick();await tick();
+  assert.doesNotMatch(progress.textContent,/2 von 4 Münzen/);control=progress.querySelector('.assessment-control');control.value='PASSED';control.dispatchEvent(new env.dom.window.Event('change'));await tick();
+  const input=progress.querySelector('input[name=awardedTokens]');assert.ok(input);assert.equal(input.value,'');input.value='3';progress.querySelector('.teacher-variable-award-editor button').click();await tick();await tick();
+  assert.match(progress.textContent,/3 von 4 Münzen/);
+ } finally {env.dom.window.close();}
 });
 test('admin curriculum filters keep subject semester class teacher and grade selects',async()=>{
  const{dom,root}=await setup(true);
