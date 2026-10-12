@@ -365,8 +365,9 @@ class TaskAndStudentProfileHandlerTest {
         HttpResponse passed=post("/set-curriculum-stage-assessment",assessmentBody(task,"CENTRAL","PASSED"),sessionCookieFor(Teacher.get(id).getUsername()));
         assertEquals(Status.OK,passed.getStatus());
         var passedJson=com.google.gson.JsonParser.parseString(responseBody(passed).split("\\r\\n\\r\\n",2)[1]).getAsJsonObject();
-        assertEquals(Set.of("status","earned"),passedJson.keySet());
+        assertEquals(Set.of("status","earned","awardedTokens"),passedJson.keySet());
         assertEquals("PASSED",passedJson.get("status").getAsString());assertTrue(passedJson.get("earned").getAsBoolean());
+        assertTrue(passedJson.get("awardedTokens").isJsonNull());
         assertEquals(Task.STATUS_COMPLETED,scalar("SELECT status FROM taskstats WHERE student=? AND task=?",id,task));
 
         int failedTask=curriculum.createCentralTask(topic,"HTTP failed",TaskLevel.LEVEL1,6,5);
@@ -416,13 +417,13 @@ class TaskAndStudentProfileHandlerTest {
         assertEquals(id,json.get("subjectId").getAsInt());assertEquals(id,json.get("semesterId").getAsInt());
         var stages=json.getAsJsonArray("stages");assertTrue(stages.size()>=3);
         assertEquals("CENTRAL",stages.get(0).getAsJsonObject().get("type").getAsString());
-        assertEquals(Set.of("type","stageId","topicId","topicName","name","tokens","status","earned","inProgress","niveau"),stages.get(0).getAsJsonObject().keySet());
+        assertEquals(Set.of("type","stageId","topicId","topicName","name","tokens","status","earned","inProgress","niveau","variableTokens","awardedTokens"),stages.get(0).getAsJsonObject().keySet());
         var centralLocked=stages.asList().stream().map(e->e.getAsJsonObject()).filter(e->e.get("stageId").getAsInt()==task).findFirst().orElseThrow();
         assertEquals("LOCKED",centralLocked.get("status").getAsString());assertTrue(centralLocked.get("earned").getAsBoolean());
         var centralFailed=stages.asList().stream().map(e->e.getAsJsonObject()).filter(e->e.get("stageId").getAsInt()==failed).findFirst().orElseThrow();
         assertEquals("FAILED_ONCE",centralFailed.get("status").getAsString());assertFalse(centralFailed.get("earned").getAsBoolean());assertTrue(centralFailed.get("inProgress").getAsBoolean());
         var flexibleJson=stages.asList().stream().map(e->e.getAsJsonObject()).filter(e->e.get("type").getAsString().equals("FLEXIBLE") && e.get("stageId").getAsInt()==flexible.id()).findFirst().orElseThrow();
-        assertEquals(Set.of("type","stageId","topicId","topicName","name","tokens","status","earned","inProgress","niveau"),flexibleJson.keySet());
+        assertEquals(Set.of("type","stageId","topicId","topicName","name","tokens","status","earned","inProgress","niveau","variableTokens","awardedTokens"),flexibleJson.keySet());
         assertTrue(flexibleJson.get("topicId").isJsonNull());assertTrue(flexibleJson.get("topicName").isJsonNull());
         assertTrue(flexibleJson.get("status").isJsonNull());assertFalse(flexibleJson.get("earned").getAsBoolean());assertFalse(flexibleJson.get("inProgress").getAsBoolean());
     }

@@ -56,13 +56,20 @@ public final class Curriculum {
     }
     public record PartnerCandidate(int id, String name) {}
     public record StudentSubject(int id, String name) {}
-    public record StageAssessment(AssessmentStatus status, boolean earned) {}
+    public record StageAssessment(AssessmentStatus status, boolean earned, Integer awardedTokens) {
+        public StageAssessment(AssessmentStatus status, boolean earned) { this(status, earned, null); }
+    }
     public record StudentStageProgress(ActiveStageType type, int stageId, Integer topicId, String topicName,
                                       String name, int tokens, AssessmentStatus status, boolean earned,
-                                      boolean inProgress, Integer niveau) {
+                                      boolean inProgress, Integer niveau, boolean variableTokens, Integer awardedTokens) {
         public StudentStageProgress(ActiveStageType type, int stageId, Integer topicId, String topicName,
                                     String name, int tokens, AssessmentStatus status, boolean earned, boolean inProgress) {
-            this(type, stageId, topicId, topicName, name, tokens, status, earned, inProgress, null);
+            this(type, stageId, topicId, topicName, name, tokens, status, earned, inProgress, null, false, null);
+        }
+        public StudentStageProgress(ActiveStageType type, int stageId, Integer topicId, String topicName,
+                                    String name, int tokens, AssessmentStatus status, boolean earned,
+                                    boolean inProgress, Integer niveau) {
+            this(type, stageId, topicId, topicName, name, tokens, status, earned, inProgress, niveau, false, null);
         }
     }
     public record StudentProgressDetail(int studentId, String studentName, int subjectId, int semesterId,
@@ -169,7 +176,7 @@ public final class Curriculum {
                     + "JOIN topics p ON p.id=t.topic WHERE x.student=s.id AND x.status=2 AND p.semester=? "
                     + "AND EXISTS (SELECT 1 FROM student_curriculum_contexts ctx WHERE ctx.student=s.id "
                     + "AND ctx.subject=p.subject AND ctx.semester=p.semester AND (ctx.class=s.class OR ctx.class IS NULL))),0) "
-                    + "+ COALESCE((SELECT SUM(t.tokens) FROM completed_flexible_tasks x JOIN flexible_tasks t ON t.id=x.flexible_task "
+                    + "+ COALESCE((SELECT SUM(COALESCE(x.awarded_tokens,t.tokens)) FROM completed_flexible_tasks x JOIN flexible_tasks t ON t.id=x.flexible_task "
                     + "WHERE x.student=s.id AND t.semester=? AND EXISTS (SELECT 1 FROM student_curriculum_contexts ctx "
                     + "WHERE ctx.student=s.id AND ctx.subject=t.subject AND ctx.semester=t.semester "
                     + "AND (ctx.course_group=t.course_group OR (t.course_group IS NULL AND ctx.class=t.class)))),0) AS totalCoins "
@@ -592,8 +599,8 @@ public final class Curriculum {
                 scope.teacherId(),scope.subjectId(),scope.classId(),scope.semesterId());
     }
     private static List<Map<String,Object>> plannedFlexibleTasks(Connection c,Scope scope) throws SQLException {
-        if(individualSubject(c,scope.subjectId())) return rows(c,"SELECT t.id,t.name,t.tokens,p.id AS topicId,p.name AS topicName FROM flexible_tasks t LEFT JOIN flexible_task_topics m ON m.flexible_task=t.id LEFT JOIN flexible_topics p ON p.id=m.flexible_topic WHERE t.course_group=? ORDER BY t.id",resolveScope(c,scope).courseGroupId());
-        return rows(c,"SELECT t.id,t.name,t.tokens,p.id AS topicId,p.name AS topicName FROM flexible_tasks t "
+        if(individualSubject(c,scope.subjectId())) return rows(c,"SELECT t.id,t.name,t.tokens,t.variable_tokens AS variableTokens,p.id AS topicId,p.name AS topicName FROM flexible_tasks t LEFT JOIN flexible_task_topics m ON m.flexible_task=t.id LEFT JOIN flexible_topics p ON p.id=m.flexible_topic WHERE t.course_group=? ORDER BY t.id",resolveScope(c,scope).courseGroupId());
+        return rows(c,"SELECT t.id,t.name,t.tokens,t.variable_tokens AS variableTokens,p.id AS topicId,p.name AS topicName FROM flexible_tasks t "
                 + "LEFT JOIN flexible_task_topics m ON m.flexible_task=t.id LEFT JOIN flexible_topics p ON p.id=m.flexible_topic "
                 + "AND p.owner_teacher=t.owner_teacher AND p.subject=t.subject AND p.class=t.class AND p.semester=t.semester AND p.grade=t.grade "
                 + "WHERE t.owner_teacher=? AND t.subject=? AND t.class=? AND t.semester=? ORDER BY t.id",
@@ -955,7 +962,10 @@ public final class Curriculum {
             boolean earned=earned(c,studentId,scope,stageType,stageId,grade);
             AssessmentStatus status=assessmentOverride(c,studentId,scope,stageType,stageId);
             if(status==null && earned) status=AssessmentStatus.PASSED;
-            return new StageAssessment(status,earned);
+            Integer awarded=null;
+            if (stageType==ActiveStageType.FLEXIBLE && earned)
+                awarded=integer(require(c,"SELECT COALESCE(x.awarded_tokens,t.tokens) AS awardedTokens FROM completed_flexible_tasks x JOIN flexible_tasks t ON t.id=x.flexible_task WHERE x.student=? AND x.flexible_task=? AND "+ACTIVE_COMPLETION,studentId,stageId),"awardedTokens");
+            return new StageAssessment(status,earned,awarded);
         });
     }
     private static StageAssessment stageAssessment(Connection c, int studentId, Scope scope,
@@ -963,7 +973,10 @@ public final class Curriculum {
         boolean earned=earned(c,studentId,scope,stageType,stageId,grade);
         AssessmentStatus status=assessmentOverride(c,studentId,scope,stageType,stageId);
         if(status==null && earned) status=AssessmentStatus.PASSED;
-        return new StageAssessment(status,earned);
+        Integer awarded=null;
+        if (stageType==ActiveStageType.FLEXIBLE && earned)
+            awarded=integer(require(c,"SELECT COALESCE(x.awarded_tokens,t.tokens) AS awardedTokens FROM completed_flexible_tasks x JOIN flexible_tasks t ON t.id=x.flexible_task WHERE x.student=? AND x.flexible_task=? AND "+ACTIVE_COMPLETION,studentId,stageId),"awardedTokens");
+        return new StageAssessment(status,earned,awarded);
     }
     /** Canonical teacher read model for every central and flexible stage in one exact context. */
     public StudentProgressDetail studentProgressDetail(Actor actor, int studentId, Scope scope) throws SQLException {
@@ -991,9 +1004,10 @@ public final class Curriculum {
                 StageAssessment assessment=stageAssessment(c,studentId,scope,ActiveStageType.CENTRAL,stageId,grade);
                 stages.add(new StudentStageProgress(ActiveStageType.CENTRAL,stageId,integer(row,"topicId"),
                         (String)row.get("topicName"),(String)row.get("name"),integer(row,"tokens"),
-                        assessment.status(),assessment.earned(),activeType==ActiveStageType.CENTRAL && activeId==stageId,integer(row,"niveau")));
+                        assessment.status(),assessment.earned(),activeType==ActiveStageType.CENTRAL && activeId==stageId,
+                        integer(row,"niveau"),false,null));
             }
-            for(var row:rows(c,"SELECT t.id,t.name,t.tokens,p.id AS topicId,p.name AS topicName "
+            for(var row:rows(c,"SELECT t.id,t.name,t.tokens,t.variable_tokens AS variableTokens,p.id AS topicId,p.name AS topicName "
                     + "FROM flexible_tasks t LEFT JOIN flexible_task_topics m ON m.flexible_task=t.id "
                     + "LEFT JOIN flexible_topics p ON p.id=m.flexible_topic AND p.owner_teacher=t.owner_teacher "
                     + "AND p.subject=t.subject AND p.class=t.class AND p.semester=t.semester AND p.grade=t.grade "
@@ -1004,7 +1018,8 @@ public final class Curriculum {
                 Integer topicId=row.get("topicId")==null?null:integer(row,"topicId");
                 stages.add(new StudentStageProgress(ActiveStageType.FLEXIBLE,stageId,topicId,(String)row.get("topicName"),
                         (String)row.get("name"),integer(row,"tokens"),assessment.status(),assessment.earned(),
-                        activeType==ActiveStageType.FLEXIBLE && activeId==stageId));
+                        activeType==ActiveStageType.FLEXIBLE && activeId==stageId,null,
+                        integer(row,"variableTokens")==1,assessment.awardedTokens()));
             }
             return new StudentProgressDetail(studentId,studentName,scope.subjectId(),scope.semesterId(),List.copyOf(stages));
         });
@@ -1350,10 +1365,13 @@ public final class Curriculum {
             this(id, name, tokens, niveau, 0, topicId, topicName);
         }
     }
-    public record CompletedFlexibleTask(int id, String name, int tokens, Integer awardedTokens) {
+    public record CompletedFlexibleTask(int id, String name, int tokens, boolean variableTokens, Integer awardedTokens) {
         /** Compatibility constructor for callers that predate awarded completion values. */
         public CompletedFlexibleTask(int id, String name, int tokens) {
-            this(id, name, tokens, null);
+            this(id, name, tokens, false, null);
+        }
+        public CompletedFlexibleTask(int id, String name, int tokens, Integer awardedTokens) {
+            this(id, name, tokens, false, awardedTokens);
         }
     }
 
@@ -1362,16 +1380,16 @@ public final class Curriculum {
         String contextFilter=individual
                 ? "t.course_group=? AND EXISTS (SELECT 1 FROM course_group_members gm WHERE gm.course_group=t.course_group AND gm.student=x.student)"
                 : "t.owner_teacher=? AND t.class=?";
-        String sql="SELECT t.id,t.name,t.tokens,x.awarded_tokens FROM flexible_tasks t JOIN completed_flexible_tasks x ON x.flexible_task=t.id "
+        String sql="SELECT t.id,t.name,t.tokens,t.variable_tokens AS variableTokens,COALESCE(x.awarded_tokens,t.tokens) AS awardedTokens FROM flexible_tasks t JOIN completed_flexible_tasks x ON x.flexible_task=t.id "
                 +"WHERE x.student=? AND t.subject=? AND t.semester=? AND "+contextFilter+" AND "+ACTIVE_COMPLETION+" ORDER BY t.id";
         Object[] args=individual
                 ? new Object[]{studentId,scope.subjectId(),scope.semesterId(),resolveScope(c,scope).courseGroupId()}
                 : new Object[]{studentId,scope.subjectId(),scope.semesterId(),scope.teacherId(),scope.classId()};
         return rows(c,sql,args).stream()
-                .map(r->new CompletedFlexibleTask(integer(r,"id"),(String)r.get("name"),integer(r,"tokens"),r.get("awarded_tokens") == null ? null : integer(r,"awarded_tokens"))).toList();
+                .map(r->new CompletedFlexibleTask(integer(r,"id"),(String)r.get("name"),integer(r,"tokens"),integer(r,"variableTokens")==1,integer(r,"awardedTokens"))).toList();
     }
     private static long flexibleCompleted(Connection c,int studentId,Scope scope) throws SQLException {
-        return completedFlexibleTasks(c,studentId,scope).stream().mapToLong(CompletedFlexibleTask::tokens).sum();
+        return completedFlexibleTasks(c,studentId,scope).stream().mapToLong(CompletedFlexibleTask::awardedTokens).sum();
     }
     private static Map<String,Object> progress(Connection c,int studentId,Scope scope) throws SQLException {
         int grade=requireAssignment(c,studentId,scope);
@@ -1381,15 +1399,11 @@ public final class Curriculum {
                 studentId,scope.subjectId(),grade,scope.semesterId()).stream()
                 .map(r->new CompletedCentralTask(integer(r,"id"),(String)r.get("name"),integer(r,"tokens"),integer(r,"niveau"),integer(r,"stageNumber"),integer(r,"topicId"),(String)r.get("topicName"))).toList();
         List<CompletedFlexibleTask> completedFlexibleTasks=completedFlexibleTasks(c,studentId,scope);
-        // Phase 2 stores the raw nullable award but keeps the existing public contract;
-        // award-aware response fields belong to the later read-model phase.
-        List<CompletedFlexibleTask> responseCompletedFlexibleTasks=completedFlexibleTasks.stream()
-                .map(task->new CompletedFlexibleTask(task.id(),task.name(),task.tokens())).toList();
         // Totals are derived from the exact returned identities in this transaction, never a second query/cache.
         long central=completedCentralTasks.stream().mapToLong(CompletedCentralTask::tokens).sum();
-        long flexible=completedFlexibleTasks.stream().mapToLong(CompletedFlexibleTask::tokens).sum();
+        long flexible=completedFlexibleTasks.stream().mapToLong(CompletedFlexibleTask::awardedTokens).sum();
         return Map.of("semesterId",scope.semesterId(),"centralTokens",central,"flexibleTokens",flexible,"totalTokens",central+flexible,
-                "completedCentralTasks",completedCentralTasks,"completedFlexibleTasks",responseCompletedFlexibleTasks);
+                "completedCentralTasks",completedCentralTasks,"completedFlexibleTasks",completedFlexibleTasks);
     }
     /** Tutor-only read model built from the same completion and stage read models as normal progress. */
     public Map<String,Object> weeklyConversationOverview(Actor actor,int semester,int classId) throws SQLException {
@@ -1435,7 +1449,7 @@ public final class Curriculum {
                         @SuppressWarnings("unchecked") List<CompletedCentralTask> central=(List<CompletedCentralTask>)totals.get("completedCentralTasks");
                         for (var stage:central) { Map<String,Object> done=new LinkedHashMap<>(); done.put("id",stage.id()); done.put("name",stage.name()); done.put("niveau",stage.niveau()); done.put("tokens",stage.tokens()); stages.add(done); }
                         @SuppressWarnings("unchecked") List<CompletedFlexibleTask> flexible=(List<CompletedFlexibleTask>)totals.get("completedFlexibleTasks");
-                        for (var stage:flexible) { Map<String,Object> done=new LinkedHashMap<>(); done.put("id",stage.id()); done.put("name",stage.name()); done.put("tokens",stage.tokens()); stages.add(done); }
+                        for (var stage:flexible) { Map<String,Object> done=new LinkedHashMap<>(); done.put("id",stage.id()); done.put("name",stage.name()); done.put("tokens",stage.tokens()); done.put("variableTokens",stage.variableTokens()); done.put("awardedTokens",stage.awardedTokens()); stages.add(done); }
                         cell.put("stages",stages);
                     }
                     cells.add(cell);
@@ -1512,8 +1526,12 @@ public final class Curriculum {
             int grade=integer(assignment,"grade");
             var earned=progress(c,studentId,scope);
             Set<Integer> centralDone=new HashSet<>(),flexibleDone=new HashSet<>();
+            Map<Integer,CompletedFlexibleTask> flexibleProgress=new HashMap<>();
             for(Object entry:(List<?>)earned.get("completedCentralTasks")) centralDone.add(((CompletedCentralTask)entry).id());
-            for(Object entry:(List<?>)earned.get("completedFlexibleTasks")) flexibleDone.add(((CompletedFlexibleTask)entry).id());
+            for(Object entry:(List<?>)earned.get("completedFlexibleTasks")) {
+                CompletedFlexibleTask task=(CompletedFlexibleTask)entry;
+                flexibleDone.add(task.id()); flexibleProgress.put(task.id(),task);
+            }
             var activeRows=rows(c,"SELECT a.subject,a.semester,a.central_task,a.flexible_task,ct.name AS centralName,ct.niveau AS centralNiveau,ft.name AS flexibleName "
                     + "FROM student_active_curriculum_stages a LEFT JOIN tasks ct ON ct.id=a.central_task LEFT JOIN flexible_tasks ft ON ft.id=a.flexible_task "
                     + "WHERE a.student=? AND a.subject=? AND a.semester=?",studentId,subject,semester);
@@ -1566,6 +1584,7 @@ public final class Curriculum {
             });
             flexibleTasks.forEach(t->{int taskId=integer(t,"id");boolean completed=flexibleDone.contains(taskId);
                 t.put("completed",completed);
+                if (completed) t.put("awardedTokens",flexibleProgress.get(taskId).awardedTokens());
                 t.put("inProgress",!completed && finalActiveStage!=null && finalActiveStage.type()==ActiveStageType.FLEXIBLE && finalActiveStage.taskId()==taskId);
             });
             long centralPlanned=central(c,subject,grade,semester),flexiblePlanned=flexible(c,scope);

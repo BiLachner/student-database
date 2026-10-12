@@ -126,8 +126,8 @@ public final class CurriculumRequestHandler {
                     throw new CurriculumException(403,"forbidden","Student session required.");
                 int subject=integer(rq,"subjectId"),semester=effectiveSemesterId(rq);
                 if(rq.getPath().equals("/my-curriculum-catalog"))
-                    return PostResponse.jsonWithNulls(withoutPhase2AwardFields(service.studentCatalog(rq.getUser(),subject,semester)),rq);
-                return PostResponse.json(withoutPhase2AwardFields(service.studentProgress(rq.getUser(),subject,semester)),rq);
+                    return PostResponse.jsonWithNulls(service.studentCatalog(rq.getUser(),subject,semester),rq);
+                return PostResponse.json(service.studentProgress(rq.getUser(),subject,semester),rq);
             }
             if(rq.getPath().equals("/set-curriculum-stage-assessment")) {
                 Set<String> required=Set.of("studentId","subjectId","classId","semesterId","stageType","stageId","status");
@@ -142,6 +142,7 @@ public final class CurriculumRequestHandler {
                 Map<String,Object> assessmentResponse=new LinkedHashMap<>();
                 assessmentResponse.put("status",assessment.status()==null?null:assessment.status().name());
                 assessmentResponse.put("earned",assessment.earned());
+                assessmentResponse.put("awardedTokens",assessment.awardedTokens());
                 return PostResponse.jsonWithNulls(assessmentResponse,rq);
             }
             if(rq.getPath().equals("/curriculum-student-progress-detail")) {
@@ -295,7 +296,7 @@ public final class CurriculumRequestHandler {
                 case "/preview-central-curriculum-import" -> result=centralImport.preview(actor,integer(rq,"grade"),integer(rq,"semesterId"),string(rq,"csv"));
                 case "/import-central-curriculum" -> result=centralImport.importCsv(actor,integer(rq,"grade"),integer(rq,"semesterId"),string(rq,"csv"));
                 case "/curriculum-budget" -> result=service.budget(actor,scope(rq,actor));
-                case "/curriculum-progress" -> result=withoutPhase2AwardFields(service.progress(actor,integer(rq,"studentId"),scope(rq,actor,true)));
+                case "/curriculum-progress" -> result=service.progress(actor,integer(rq,"studentId"),scope(rq,actor,true));
                 case "/flexible-tasks" -> result=service.list(actor,scope(rq,actor));
                 case "/flexible-curriculum-structure" -> result=service.flexibleStructure(actor,scope(rq,actor));
                 case "/add-flexible-topic" -> result=Map.of("id",service.createFlexibleTopic(actor,scope(rq,actor),name(rq)));
@@ -331,29 +332,4 @@ public final class CurriculumRequestHandler {
         }
     }
 
-    /** Keeps the Phase-2 raw nullable award internal until the award read-model phase. */
-    private static Map<String,Object> withoutPhase2AwardFields(Map<String,Object> response) {
-        Map<String,Object> result=new LinkedHashMap<>(response);
-        Object nested=response.get("progress");
-        if (nested instanceof Map<?,?> progress) result.put("progress",withoutPhase2AwardFields(castMap(progress)));
-        Object completed=response.get("completedFlexibleTasks");
-        if (completed instanceof List<?> entries) {
-            List<Map<String,Object>> publicEntries=new ArrayList<>();
-            for (Object entry:entries) {
-                if (entry instanceof Curriculum.CompletedFlexibleTask task) {
-                    Map<String,Object> publicEntry=new LinkedHashMap<>();
-                    publicEntry.put("id",task.id()); publicEntry.put("name",task.name()); publicEntry.put("tokens",task.tokens());
-                    publicEntries.add(publicEntry);
-                } else if (entry instanceof Map<?,?> map) publicEntries.add(castMap(map));
-            }
-            result.put("completedFlexibleTasks",publicEntries);
-        }
-        return result;
-    }
-
-    private static Map<String,Object> castMap(Map<?,?> source) {
-        Map<String,Object> result=new LinkedHashMap<>();
-        source.forEach((key,value)->result.put(String.valueOf(key),value));
-        return result;
-    }
 }

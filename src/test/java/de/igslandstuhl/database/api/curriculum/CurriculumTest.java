@@ -1151,6 +1151,61 @@ class CurriculumTest {
         service.setStageAssessment(teacher,id,scope,Curriculum.ActiveStageType.FLEXIBLE,task.id(),Curriculum.AssessmentStatus.FAILED_TWICE,2);
         assertEquals(0,scalar("SELECT COUNT(*) FROM completed_flexible_tasks WHERE student=? AND flexible_task=?",id,task.id()));
     }
+    @Test void earnedReadModelsUseAwardsAndKeepMaximumsSeparate() throws Exception {
+        db.writeTransaction(c->{
+            exec(c,"INSERT INTO curriculum_class_teachers(semester,class,subject,teacher) VALUES(?,?,?,?)",id,id,id,id);
+            exec(c,"INSERT INTO curriculum_grade_subjects(grade,semester,subject) VALUES(?,?,?)",5,id,id);
+            exec(c,"INSERT INTO curriculum_class_tutors(semester,class,teacher,tutor_slot) VALUES(?,?,?,1)",id,id,id);
+            return null;
+        });
+        var fixed=service.create(teacher,scope,"Read fixed",4);
+        var variable=service.create(teacher,scope,"Read variable",4,true);
+        var legacy=service.create(teacher,scope,"Read legacy",3);
+        service.complete(teacher,fixed.id(),id);
+        service.complete(teacher,variable.id(),id,2);
+        db.writeTransaction(c->{exec(c,"INSERT INTO completed_flexible_tasks(student,flexible_task) VALUES(?,?)",id,legacy.id());return null;});
+
+        assertEquals(9,service.completedTokens(id,scope));
+        var progress=service.progress(teacher,id,scope);
+        assertEquals(9L,progress.get("flexibleTokens"));assertEquals(9L,progress.get("totalTokens"));
+        var completed=flexibleDetails(progress);
+        assertEquals(List.of(4,4,3),completed.stream().map(Curriculum.CompletedFlexibleTask::tokens).toList());
+        assertEquals(List.of(4,2,3),completed.stream().map(Curriculum.CompletedFlexibleTask::awardedTokens).toList());
+        assertFalse(completed.get(0).variableTokens());assertTrue(completed.get(1).variableTokens());
+
+        var assessment=service.stageAssessment(teacher,id,scope,Curriculum.ActiveStageType.FLEXIBLE,variable.id());
+        assertTrue(assessment.earned());assertEquals(2,assessment.awardedTokens());
+        var detail=service.studentProgressDetail(teacher,id,scope);
+        var variableStage=detail.stages().stream().filter(stage->stage.stageId()==variable.id()).findFirst().orElseThrow();
+        assertTrue(variableStage.variableTokens());assertEquals(4,variableStage.tokens());assertEquals(2,variableStage.awardedTokens());
+
+        var catalog=service.studentCatalog(Student.get(id),id,id);
+        var catalogVariable=rows(catalog,"flexibleTasks").stream().filter(row->((Number)row.get("id")).intValue()==variable.id()).findFirst().orElseThrow();
+        assertEquals(4,catalogVariable.get("tokens"));assertEquals(2,catalogVariable.get("awardedTokens"));
+
+        var year=currentYear();
+        var previousSemester=year.getCurrentSemester();
+        try {
+            year.setCurrentSemester(Semester.get(id));
+            assertEquals(9L,service.rankingForStudent(id).get("totalValidCoins"));
+        } finally {
+            if (previousSemester != null) year.setCurrentSemester(previousSemester);
+            else {
+                db.writeTransaction(c->{exec(c,"UPDATE school_years SET current_semester=NULL WHERE id=?",year.getId());return null;});
+                SchoolYear.getAll();
+            }
+        }
+        var forecast=Curriculum.calculateForecast(LocalDate.of(2027,1,31),LocalDate.of(2026,9,1),LocalDate.of(2027,1,31),2,
+                List.of(new Curriculum.ForecastStage("F:done",4),new Curriculum.ForecastStage("F:open",4)),Set.of("F:done"));
+        assertEquals(2L,forecast.get("earnedCoins"));assertEquals(4L,forecast.get("remainingCoinPotential"));
+
+        var weekly=service.weeklyConversationOverview(teacher,id,id);
+        var subject=((List<?>)((Map<?,?>)((List<?>)weekly.get("students")).get(0)).get("subjects")).get(0);
+        assertEquals(9L,((Map<?,?>)subject).get("totalTokens"));
+        var weeklyVariable=((List<?>)((Map<?,?>)subject).get("stages")).stream().map(Map.class::cast)
+                .filter(row->((Number)row.get("id")).intValue()==variable.id()).findFirst().orElseThrow();
+        assertEquals(2,weeklyVariable.get("awardedTokens"));
+    }
     @Test void completionHandlerAcceptsOptionalFixedAwardAndRequiresVariableAward() throws Exception {
         var fixed=service.create(teacher,scope,"Handler fixed",4);
         String fixedPayload="{\"taskId\":"+fixed.id()+",\"studentId\":"+id+"}";
@@ -1322,7 +1377,7 @@ class CurriculumTest {
     }
     void assertDetailSums(Map<String,Object> result) {
         long central=centralDetails(result).stream().mapToLong(Curriculum.CompletedCentralTask::tokens).sum();
-        long flexible=flexibleDetails(result).stream().mapToLong(Curriculum.CompletedFlexibleTask::tokens).sum();
+        long flexible=flexibleDetails(result).stream().mapToLong(Curriculum.CompletedFlexibleTask::awardedTokens).sum();
         assertEquals(central,result.get("centralTokens"));assertEquals(flexible,result.get("flexibleTokens"));
         assertEquals(central+flexible,result.get("totalTokens"));
     }
@@ -1338,7 +1393,7 @@ class CurriculumTest {
         service.create(teacher,scope,"Not completed",5);
         var result=ownDetails();
         assertEquals(List.of(new Curriculum.CompletedCentralTask(done,"Central",6,1,1,topic,"Topic-"+id)),centralDetails(result));
-        assertEquals(List.of(new Curriculum.CompletedFlexibleTask(flexible.id(),"Completed flexible",6)),flexibleDetails(result));
+        assertEquals(List.of(new Curriculum.CompletedFlexibleTask(flexible.id(),"Completed flexible",6,false,6)),flexibleDetails(result));
         assertEquals(12L,result.get("totalTokens"));
     }
     @Test void centralDetailsReflectCurrentTaskAndTopicDefinitions() throws Exception {
@@ -1355,7 +1410,7 @@ class CurriculumTest {
         assertEquals(409,assertThrows(CurriculumException.class,()->service.edit(teacher,task.id(),"Renamed flexible",4)).status);
         service.edit(teacher,task.id(),"Renamed flexible",6);
         var result=ownDetails();assertEquals(6L,result.get("totalTokens"));
-        assertEquals(List.of(new Curriculum.CompletedFlexibleTask(task.id(),"Renamed flexible",6)),flexibleDetails(result));
+        assertEquals(List.of(new Curriculum.CompletedFlexibleTask(task.id(),"Renamed flexible",6,false,6)),flexibleDetails(result));
     }
     @Test void detailArraysKeepZeroTokensAndDistinctIdsWithIdenticalNames() throws Exception {
         int first=central(0);Student.get(id).changeTaskStatus(Task.get(first),Task.STATUS_COMPLETED);
@@ -1365,7 +1420,7 @@ class CurriculumTest {
         var flexible=service.create(teacher,scope,"Central",0);service.complete(teacher,flexible.id(),id);
         var result=ownDetails();assertEquals(0L,result.get("totalTokens"));
         assertEquals(List.of(first,second),centralDetails(result).stream().map(Curriculum.CompletedCentralTask::id).toList());
-        assertEquals(List.of(new Curriculum.CompletedFlexibleTask(flexible.id(),"Central",0)),flexibleDetails(result));
+        assertEquals(List.of(new Curriculum.CompletedFlexibleTask(flexible.id(),"Central",0,false,0)),flexibleDetails(result));
     }
     @Test void assignedContextWithoutCompletionsReturnsEmptyArrays() throws Exception {
         central(6);service.create(teacher,scope,"Not completed",6);
@@ -1401,7 +1456,7 @@ class CurriculumTest {
         var a=service.create(teacher,scope,"A",6);var b=service.create(other,secondScope(),"B",6);
         service.complete(teacher,a.id(),id);
         service.transfer(admin,id,scope,secondScope(),List.of(new Curriculum.Transfer(a.id(),b.id(),6)));
-        assertEquals(List.of(new Curriculum.CompletedFlexibleTask(b.id(),"B",6)),flexibleDetails(ownDetails()));
+        assertEquals(List.of(new Curriculum.CompletedFlexibleTask(b.id(),"B",6,false,6)),flexibleDetails(ownDetails()));
         assertEquals(1,scalar("SELECT COUNT(*) FROM completed_flexible_tasks WHERE student=? AND flexible_task=?",id,a.id()));
         var terminal=service.create(teacher,scope,"Terminal",6);
         service.transfer(admin,id,secondScope(),scope,List.of(new Curriculum.Transfer(b.id(),terminal.id(),6)));
@@ -1409,7 +1464,7 @@ class CurriculumTest {
         assertEquals(409,assertThrows(CurriculumException.class,()->service.edit(other,b.id(),"Historical B",4)).status);
         service.edit(teacher,terminal.id(),"Current terminal",6);
         var result=ownDetails();assertEquals(6L,result.get("totalTokens"));
-        assertEquals(List.of(new Curriculum.CompletedFlexibleTask(terminal.id(),"Current terminal",6)),flexibleDetails(result));
+        assertEquals(List.of(new Curriculum.CompletedFlexibleTask(terminal.id(),"Current terminal",6,false,6)),flexibleDetails(result));
         assertEquals(3,scalar("SELECT COUNT(*) FROM completed_flexible_tasks WHERE student=?",id));
         assertEquals(2,scalar("SELECT COUNT(*) FROM curriculum_completion_transfers WHERE student=?",id));
     }
@@ -1432,10 +1487,10 @@ class CurriculumTest {
         var central=own.getAsJsonArray("completedCentralTasks").get(0).getAsJsonObject();
         assertEquals(Set.of("id","name","tokens","niveau","stageNumber","topicId","topicName"),central.keySet());
         var detail=own.getAsJsonArray("completedFlexibleTasks").get(0).getAsJsonObject();
-        assertEquals(Set.of("id","name","tokens"),detail.keySet());assertEquals("Quoted \"name\"",detail.get("name").getAsString());
+        assertEquals(Set.of("id","name","tokens","variableTokens","awardedTokens"),detail.keySet());assertEquals("Quoted \"name\"",detail.get("name").getAsString());
         long centralSum=0,flexibleSum=0;
         for(var entry:own.getAsJsonArray("completedCentralTasks"))centralSum+=entry.getAsJsonObject().get("tokens").getAsLong();
-        for(var entry:own.getAsJsonArray("completedFlexibleTasks"))flexibleSum+=entry.getAsJsonObject().get("tokens").getAsLong();
+        for(var entry:own.getAsJsonArray("completedFlexibleTasks"))flexibleSum+=entry.getAsJsonObject().get("awardedTokens").getAsLong();
         assertEquals(centralSum,own.get("centralTokens").getAsLong());assertEquals(flexibleSum,own.get("flexibleTokens").getAsLong());
         assertEquals(centralSum+flexibleSum,own.get("totalTokens").getAsLong());
     }
