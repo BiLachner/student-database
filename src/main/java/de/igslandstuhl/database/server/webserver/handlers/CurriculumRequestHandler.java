@@ -52,6 +52,12 @@ public final class CurriculumRequestHandler {
         if(!(rq.getJson().get(key) instanceof Boolean b)) throw new CurriculumException(400,"invalid_input",key+" must be boolean.");
         return b;
     }
+    private static boolean optionalBool(APIPostRequest rq,String key) {
+        return !rq.containsKey(key) ? false : bool(rq,key);
+    }
+    private static Integer optionalInteger(APIPostRequest rq,String key) {
+        return !rq.containsKey(key) || rq.getJson().get(key)==null ? null : integer(rq,key);
+    }
     private static List<?> list(APIPostRequest rq,String key) {
         if(!(rq.getJson().get(key) instanceof List<?> values))throw new CurriculumException(400,"invalid_input",key+" must be a list.");
         return values;
@@ -124,14 +130,15 @@ public final class CurriculumRequestHandler {
                 return PostResponse.json(withoutPhase2AwardFields(service.studentProgress(rq.getUser(),subject,semester)),rq);
             }
             if(rq.getPath().equals("/set-curriculum-stage-assessment")) {
-                Set<String> allowed=Set.of("studentId","subjectId","classId","semesterId","stageType","stageId","status");
-                if(!allowed.containsAll(rq.getJson().keySet()) || rq.getJson().size()!=allowed.size())
+                Set<String> required=Set.of("studentId","subjectId","classId","semesterId","stageType","stageId","status");
+                if(!rq.getJson().keySet().containsAll(required) || rq.getJson().size()>required.size()+1
+                        || (rq.getJson().size()==required.size()+1 && !rq.containsKey("awardedTokens")))
                     throw new CurriculumException(400,"invalid_input","Assessment payload contains unexpected or missing fields.");
                 Curriculum.Actor actor=Curriculum.Actor.from(rq.getUser());
                 if(actor.admin()) throw new CurriculumException(403,"forbidden","Teacher required for student assessment.");
                 Curriculum.StageAssessment assessment=service.setStageAssessment(actor,integer(rq,"studentId"),scope(rq,actor),
                         Curriculum.ActiveStageType.valueOf(string(rq,"stageType")),integer(rq,"stageId"),
-                        Curriculum.AssessmentStatus.valueOf(string(rq,"status")));
+                        Curriculum.AssessmentStatus.valueOf(string(rq,"status")),optionalInteger(rq,"awardedTokens"));
                 Map<String,Object> assessmentResponse=new LinkedHashMap<>();
                 assessmentResponse.put("status",assessment.status()==null?null:assessment.status().name());
                 assessmentResponse.put("earned",assessment.earned());
@@ -274,7 +281,8 @@ public final class CurriculumRequestHandler {
                     List<Curriculum.Transfer> transfers=new ArrayList<>();
                     for(var entry:mappings) {
                         if(!(entry instanceof Map<?,?> mapping)) throw new CurriculumException(400,"invalid_input","Invalid transfer mapping.");
-                        transfers.add(new Curriculum.Transfer(integer(mapping.get("sourceTaskId"),"sourceTaskId"),integer(mapping.get("targetTaskId"),"targetTaskId"),integer(mapping.get("tokens"),"tokens")));
+                        int hint=mapping.containsKey("tokens") && mapping.get("tokens")!=null ? integer(mapping.get("tokens"),"tokens") : 0;
+                        transfers.add(new Curriculum.Transfer(integer(mapping.get("sourceTaskId"),"sourceTaskId"),integer(mapping.get("targetTaskId"),"targetTaskId"),hint));
                     }
                     service.transfer(actor,integer(rq,"studentId"),source,target,transfers);result=Map.of("ok",true);
                 }
@@ -296,9 +304,9 @@ public final class CurriculumRequestHandler {
                 case "/delete-flexible-task" -> result=service.deleteFlexibleTask(actor,integer(rq,"taskId"));
                 case "/flexible-topic-delete-preview" -> result=service.flexibleTopicDeletionPreview(actor,integer(rq,"topicId"));
                 case "/delete-flexible-topic" -> result=service.deleteFlexibleTopic(actor,integer(rq,"topicId"));
-                case "/add-flexible-task" -> result=service.create(actor,scope(rq,actor),name(rq),integer(rq,"tokens"),optionalTopic(rq));
-                case "/edit-flexible-task" -> result=service.edit(actor,integer(rq,"taskId"),name(rq),integer(rq,"tokens"),rq.containsKey("topicId"),optionalTopic(rq));
-                case "/complete-flexible-task" -> {service.complete(actor,integer(rq,"taskId"),integer(rq,"studentId"));result=Map.of("ok",true);}
+                case "/add-flexible-task" -> result=service.create(actor,scope(rq,actor),name(rq),integer(rq,"tokens"),optionalBool(rq,"variableTokens"),optionalTopic(rq));
+                case "/edit-flexible-task" -> result=service.edit(actor,integer(rq,"taskId"),name(rq),integer(rq,"tokens"),optionalBool(rq,"variableTokens"),rq.containsKey("topicId"),optionalTopic(rq));
+                case "/complete-flexible-task" -> {service.complete(actor,integer(rq,"taskId"),integer(rq,"studentId"),optionalInteger(rq,"awardedTokens"));result=Map.of("ok",true);}
                 case "/rename-topic" -> {service.renameTopic(actor,integer(rq,"topicId"),name(rq));result=Map.of("ok",true);}
                 case "/edit-task" -> {service.editTask(actor,integer(rq,"taskId"),name(rq),integer(rq,"tokens"));result=Map.of("ok",true);}
                 case "/add-curriculum-topic" -> result=Map.of("id",service.createTopic(actor,integer(rq,"subjectId"),integer(rq,"grade"),integer(rq,"semesterId"),integer(rq,"number"),name(rq)));

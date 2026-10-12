@@ -307,6 +307,23 @@ public final class Curriculum {
     private static void tokens(int value) {
         if (value < 0 || value > HARD_LIMIT) throw error(400, "invalid_input", "Tokens must be between 0 and 105.");
     }
+    private static void validateVariableTask(int tokenValue, boolean variableTokens) {
+        tokens(tokenValue);
+        if (variableTokens && tokenValue < 1)
+            throw error(400, "invalid_input", "Variable flexible tasks require at least 1 token.");
+    }
+    private static int resolveAward(FlexibleTask task, Integer suppliedAward) {
+        if (!task.variableTokens()) {
+            if (suppliedAward != null && suppliedAward != task.tokens())
+                throw error(400, "invalid_input", "Fixed flexible tasks must award their maximum token value.");
+            return task.tokens();
+        }
+        if (task.tokens() < 1)
+            throw error(400, "invalid_input", "Variable flexible tasks require at least 1 maximum token.");
+        if (suppliedAward == null || suppliedAward < 1 || suppliedAward > task.tokens())
+            throw error(400, "invalid_input", "Awarded tokens must be between 1 and the task maximum.");
+        return suppliedAward;
+    }
     private static int positive(int value, String name) {
         if (value < 1) throw error(400, "invalid_input", name + " must be positive.");
         return value;
@@ -512,31 +529,46 @@ public final class Curriculum {
             return data.stream().map(Curriculum::task).toList();});
     }
     public FlexibleTask create(Actor actor,Scope scope,String name,int tokenValue) throws SQLException {
-        return create(actor,scope,name,tokenValue,null);
+        return create(actor,scope,name,tokenValue,false,null);
     }
     public FlexibleTask create(Actor actor,Scope scope,String name,int tokenValue,Integer topicId) throws SQLException {
-        String value=validName(name);tokens(tokenValue);
+        return create(actor,scope,name,tokenValue,false,topicId);
+    }
+    public FlexibleTask create(Actor actor,Scope scope,String name,int tokenValue,boolean variableTokens) throws SQLException {
+        return create(actor,scope,name,tokenValue,variableTokens,null);
+    }
+    public FlexibleTask create(Actor actor,Scope scope,String name,int tokenValue,boolean variableTokens,Integer topicId) throws SQLException {
+        String value=validName(name);validateVariableTask(tokenValue,variableTokens);
         return transaction(c->{int grade=authorize(c,actor,scope,true);
             limit(List.of(Budget.of(scope,grade,central(c,scope.subjectId(),grade,scope.semesterId()),flexible(c,scope)+tokenValue)));
             Integer group=individualSubject(c,scope.subjectId())?resolveScope(c,scope).courseGroupId():null;
-            write(c,"INSERT INTO flexible_tasks(owner_teacher,subject,class,semester,grade,name,tokens,course_group) VALUES(?,?,?,?,?,?,?,?)",
-                    scope.teacherId(),scope.subjectId(),scope.classId(),scope.semesterId(),grade,value,tokenValue,group);
+            write(c,"INSERT INTO flexible_tasks(owner_teacher,subject,class,semester,grade,name,tokens,variable_tokens,course_group) VALUES(?,?,?,?,?,?,?,?,?)",
+                    scope.teacherId(),scope.subjectId(),scope.classId(),scope.semesterId(),grade,value,tokenValue,variableTokens?1:0,group);
             var created=task(require(c,"SELECT * FROM flexible_tasks WHERE id=last_insert_rowid()"));
             setFlexibleTopic(c,created,topicId);
             return created;});
     }
     public FlexibleTask edit(Actor actor,int id,String name,int tokenValue) throws SQLException {
-        return edit(actor,id,name,tokenValue,false,null);
+        return edit(actor,id,name,tokenValue,false,false,null,null);
     }
     /** An omitted topic preserves the old association; explicit null removes it. */
     public FlexibleTask edit(Actor actor,int id,String name,int tokenValue,boolean updateTopic,Integer topicId) throws SQLException {
-        String value=validName(name);tokens(tokenValue);
+        return edit(actor,id,name,tokenValue,false,updateTopic,topicId,null);
+    }
+    public FlexibleTask edit(Actor actor,int id,String name,int tokenValue,boolean variableTokens,boolean updateTopic,Integer topicId) throws SQLException {
+        return edit(actor,id,name,tokenValue,variableTokens,updateTopic,topicId,Boolean.TRUE);
+    }
+    private FlexibleTask edit(Actor actor,int id,String name,int tokenValue,boolean variableTokens,boolean updateTopic,Integer topicId,Boolean variableTokensProvided) throws SQLException {
+        String value=validName(name);validateVariableTask(tokenValue,variableTokens);
         return transaction(c->{FlexibleTask old=task(require(c,"SELECT * FROM flexible_tasks WHERE id=?",id));
             authorize(c,actor,old.scope(),false);
-            if(old.tokens()!=tokenValue && number(c,"SELECT COUNT(*) FROM completed_flexible_tasks WHERE flexible_task=?",id)>0)
-                throw error(409,"completion_history_conflict","Der Münzwert kann nicht geändert werden, weil bereits Leistungen bestätigt wurden.");
+            boolean requestedVariable=variableTokensProvided==null?old.variableTokens():variableTokens;
+            validateVariableTask(tokenValue,requestedVariable);
+            if((old.tokens()!=tokenValue || old.variableTokens()!=requestedVariable)
+                    && number(c,"SELECT COUNT(*) FROM completed_flexible_tasks WHERE flexible_task=?",id)>0)
+                throw error(409,"completion_history_conflict","Task definition cannot change because completion history exists.");
             limit(List.of(Budget.of(old.scope(),old.grade(),central(c,old.subjectId(),old.grade(),old.semesterId()),flexible(c,old.scope())-old.tokens()+tokenValue)));
-            write(c,"UPDATE flexible_tasks SET name=?,tokens=? WHERE id=?",value,tokenValue,id);
+            write(c,"UPDATE flexible_tasks SET name=?,tokens=?,variable_tokens=? WHERE id=?",value,tokenValue,requestedVariable?1:0,id);
             if(updateTopic) setFlexibleTopic(c,old,topicId);
             return task(require(c,"SELECT * FROM flexible_tasks WHERE id=?",id));});
     }
@@ -691,12 +723,31 @@ public final class Curriculum {
         return transaction(c->{
             var from=transferSource(c,student,target);
             validateTransferTarget(c,student,target,integer(from,"grade"));
+            var completions=activeTasks(c,student,target.subjectId(),target.semesterId());
+            List<Map<String,Object>> compatibleTargets=new ArrayList<>();
+            for (var source:completions) {
+                List<FlexibleTask> targets=rows(c,"SELECT t.* FROM flexible_tasks t WHERE t.owner_teacher=? AND t.subject=? AND t.class=? AND t.semester=? "
+                                + "AND t.tokens=? AND t.variable_tokens=? AND NOT EXISTS (SELECT 1 FROM completed_flexible_tasks x WHERE x.student=? AND x.flexible_task=t.id) ORDER BY t.id",
+                        target.teacherId(),target.subjectId(),target.classId(),target.semesterId(),source.tokens(),source.variableTokens(),student)
+                        .stream().map(Curriculum::task).toList();
+                compatibleTargets.add(Map.of("sourceTaskId",source.id(),"tokens",source.tokens(),"variableTokens",source.variableTokens(),
+                        "awardedTokens",effectiveCompletionAward(c,student,source),"targets",targets));
+            }
             return Map.of("source",assignmentScope(from,target.subjectId(),target.semesterId()),
-                    "completions",activeTasks(c,student,target.subjectId(),target.semesterId()),
+                    "completions",completions,
+                    "compatibleTargets",compatibleTargets,
                     "targets",rows(c,"SELECT t.* FROM flexible_tasks t WHERE t.owner_teacher=? AND t.subject=? AND t.class=? AND t.semester=? "
                             + "AND NOT EXISTS (SELECT 1 FROM completed_flexible_tasks x WHERE x.student=? AND x.flexible_task=t.id) ORDER BY t.id",
                             target.teacherId(),target.subjectId(),target.classId(),target.semesterId(),student).stream().map(Curriculum::task).toList());
         });
+    }
+    private static int effectiveCompletionAward(Connection c,int student,FlexibleTask task) throws SQLException {
+        var completion=require(c,"SELECT awarded_tokens FROM completed_flexible_tasks WHERE student=? AND flexible_task=?",student,task.id());
+        Object raw=completion.get("awarded_tokens");
+        int award=raw==null?task.tokens():integer(completion,"awarded_tokens");
+        if (award<0 || award>task.tokens() || (task.variableTokens() && award<1))
+            throw error(409,"context_conflict","Source completion has an invalid award.");
+        return award;
     }
     private static int validateTransferTarget(Connection c,int student,Scope target,int previousGrade) throws SQLException {
         int grade=authorize(c,new Actor(false,target.teacherId()),target,true);
@@ -734,11 +785,12 @@ public final class Curriculum {
                 var destination=task(require(c,"SELECT * FROM flexible_tasks WHERE id=?",mapping.targetTaskId()));
                 if(!destination.scope().equals(target) || destination.grade()!=grade || source.grade()!=grade)
                     throw error(409,"context_conflict","Completion mapping belongs to a different context.");
-                if(mapping.tokens()!=source.tokens() || mapping.tokens()!=destination.tokens())
-                    throw error(409,"context_conflict","Transferred tasks must retain the previewed token value.");
+                if(source.tokens()!=destination.tokens() || source.variableTokens()!=destination.variableTokens())
+                    throw error(409,"context_conflict","Transferred tasks must have matching maximum and variable-token mode.");
                 if(number(c,"SELECT COUNT(*) FROM completed_flexible_tasks WHERE student=? AND flexible_task=?",student,destination.id())>0)
                     throw error(409,"context_conflict","Target task already has completion history.");
-                write(c,"INSERT INTO completed_flexible_tasks(student,flexible_task) VALUES(?,?)",student,destination.id());
+                int award=effectiveCompletionAward(c,student,source);
+                persistFlexibleCompletion(c,student,destination,award);
                 write(c,"INSERT INTO curriculum_completion_transfers(student,source_task,target_task) VALUES(?,?,?)",student,source.id(),destination.id());
             }
             compatibleCompletions(c,student,target,grade);
@@ -960,6 +1012,11 @@ public final class Curriculum {
     public StageAssessment setStageAssessment(Actor actor, int studentId, Scope scope,
                                               ActiveStageType stageType, int stageId,
                                               AssessmentStatus status) throws SQLException {
+        return setStageAssessment(actor,studentId,scope,stageType,stageId,status,null);
+    }
+    public StageAssessment setStageAssessment(Actor actor, int studentId, Scope scope,
+                                              ActiveStageType stageType, int stageId,
+                                              AssessmentStatus status, Integer suppliedAward) throws SQLException {
         if(actor==null || actor.admin()) throw error(403,"forbidden","Teacher required for student assessment.");
         if(status==null) throw error(400,"invalid_input","Assessment status is required.");
         if(status==AssessmentStatus.UNASSESSED) {
@@ -983,7 +1040,8 @@ public final class Curriculum {
                     write(c,"DELETE FROM student_active_curriculum_stages WHERE student=? AND subject=? AND semester=? AND central_task=?",
                             studentId,scope.subjectId(),scope.semesterId(),stageId);
                 } else {
-                    write(c,"INSERT INTO completed_flexible_tasks(student,flexible_task) VALUES(?,?) ON CONFLICT(student,flexible_task) DO NOTHING",studentId,stageId);
+                    FlexibleTask task=task(require(c,"SELECT * FROM flexible_tasks WHERE id=?",stageId));
+                    persistFlexibleCompletion(c,studentId,task,resolveAward(task,suppliedAward));
                     write(c,"DELETE FROM student_curriculum_stage_assessments WHERE student=? AND subject=? AND semester=? AND stage_type=? AND stage_id=?",
                             studentId,scope.subjectId(),scope.semesterId(),stageType.name(),stageId);
                     write(c,"DELETE FROM student_active_curriculum_stages WHERE student=? AND subject=? AND semester=? AND flexible_task=?",
@@ -1002,6 +1060,16 @@ public final class Curriculum {
             if(student!=null && task!=null) student.applyTaskStatusCache(task,Task.STATUS_COMPLETED);
         }
         return stageAssessment(actor,studentId,scope,stageType,stageId);
+    }
+    private static void persistFlexibleCompletion(Connection c,int studentId,FlexibleTask task,int award) throws SQLException {
+        var existing=rows(c,"SELECT awarded_tokens FROM completed_flexible_tasks WHERE student=? AND flexible_task=?",studentId,task.id());
+        if(!existing.isEmpty()) {
+            Object raw=existing.get(0).get("awarded_tokens");
+            int effective=raw==null?task.tokens():integer(existing.get(0),"awarded_tokens");
+            if(effective!=award) throw error(409,"completion_award_conflict","A different award already exists; reset the completion before changing it.");
+            return;
+        }
+        write(c,"INSERT INTO completed_flexible_tasks(student,flexible_task,awarded_tokens) VALUES(?,?,?)",studentId,task.id(),award);
     }
     private StageAssessment resetStageAssessment(Actor actor, int studentId, Scope scope,
                                                   ActiveStageType stageType, int stageId) throws SQLException {
@@ -1257,8 +1325,11 @@ public final class Curriculum {
         signals.put("exam",requests.contains("EXAM"));
         return signals;
     }
-    /** Completions store identity only. The definition's current tokens always apply. */
+    /** Completes a flexible task using the shared server-authoritative award rule. */
     public void complete(Actor actor,int taskId,int studentId) throws SQLException {
+        complete(actor,taskId,studentId,null);
+    }
+    public void complete(Actor actor,int taskId,int studentId,Integer suppliedAward) throws SQLException {
         transaction(c->{FlexibleTask task=task(require(c,"SELECT * FROM flexible_tasks WHERE id=?",taskId));
             authorize(c,actor,task.scope(),false);
             var student=require(c,"SELECT class FROM students WHERE id=?",studentId);
@@ -1268,7 +1339,7 @@ public final class Curriculum {
                 throw error(409,"context_conflict","This completion was already transferred.");
             if(grade!=task.grade()) throw error(409,"context_conflict","Context contains inconsistent historical grades.");
             limit(List.of(Budget.of(task.scope(),grade,central(c,task.subjectId(),grade,task.semesterId()),flexible(c,task.scope()))));
-            write(c,"INSERT INTO completed_flexible_tasks(student,flexible_task) VALUES(?,?) ON CONFLICT(student,flexible_task) DO NOTHING",studentId,taskId);return null;});
+            persistFlexibleCompletion(c,studentId,task,resolveAward(task,suppliedAward));return null;});
     }
     public long completedTokens(int studentId,Scope scope) throws SQLException {
         return transaction(c->{requireAssignment(c,studentId,scope);return flexibleCompleted(c,studentId,scope);});

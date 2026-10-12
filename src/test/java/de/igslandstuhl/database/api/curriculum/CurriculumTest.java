@@ -1106,6 +1106,83 @@ class CurriculumTest {
         var a=service.create(teacher,scope,"Zero",0);service.complete(teacher,a.id(),id);
         assertThrows(CurriculumException.class,()->service.assign(admin,id,secondScope()));
     }
+    @Test void variableFlexibleAwardsUseOneAuthoritativeCompletionRuleAndReset() throws Exception {
+        var fixed=service.create(teacher,scope,"Fixed award",4);
+        service.complete(teacher,fixed.id(),id);
+        assertEquals(4,scalar("SELECT awarded_tokens FROM completed_flexible_tasks WHERE student=? AND flexible_task=?",id,fixed.id()));
+        assertEquals(400,assertThrows(CurriculumException.class,()->service.complete(teacher,fixed.id(),id,2)).status);
+
+        var variable=service.create(teacher,scope,"Variable award",4,true);
+        assertEquals(400,assertThrows(CurriculumException.class,()->service.complete(teacher,variable.id(),id)).status);
+        db.writeTransaction(c->{
+            exec(c,"INSERT INTO curriculum_class_teachers(semester,class,subject,teacher) VALUES(?,?,?,?)",id,id,id,id);
+            exec(c,"INSERT INTO student_active_curriculum_stages(student,subject,semester,central_task,flexible_task) VALUES(?,?,?,NULL,?)",id,id,id,variable.id());
+            return null;
+        });
+        service.setStageAssessment(teacher,id,scope,Curriculum.ActiveStageType.FLEXIBLE,variable.id(),Curriculum.AssessmentStatus.PASSED,2);
+        assertEquals(2,scalar("SELECT awarded_tokens FROM completed_flexible_tasks WHERE student=? AND flexible_task=?",id,variable.id()));
+        service.complete(teacher,variable.id(),id,2);
+        var conflict=assertThrows(CurriculumException.class,()->service.complete(teacher,variable.id(),id,3));
+        assertEquals(409,conflict.status);assertEquals("completion_award_conflict",conflict.code);
+
+        service.setStageAssessment(teacher,id,scope,Curriculum.ActiveStageType.FLEXIBLE,variable.id(),Curriculum.AssessmentStatus.UNASSESSED);
+        assertEquals(0,scalar("SELECT COUNT(*) FROM completed_flexible_tasks WHERE student=? AND flexible_task=?",id,variable.id()));
+        service.setStageAssessment(teacher,id,scope,Curriculum.ActiveStageType.FLEXIBLE,variable.id(),Curriculum.AssessmentStatus.PASSED,3);
+        assertEquals(3,scalar("SELECT awarded_tokens FROM completed_flexible_tasks WHERE student=? AND flexible_task=?",id,variable.id()));
+    }
+    @Test void variableTaskValidationAndCompletionHistoryGuardAreServerSide() throws Exception {
+        assertEquals(400,assertThrows(CurriculumException.class,()->service.create(teacher,scope,"Invalid variable",0,true)).status);
+        var task=service.create(teacher,scope,"Editable variable",4,true);
+        service.edit(teacher,task.id(),"Fixed before history",4,false,false,null);
+        assertFalse(service.list(teacher,scope).stream().filter(t->t.id()==task.id()).findFirst().orElseThrow().variableTokens());
+        service.edit(teacher,task.id(),"Variable again",4,true,false,null);
+        service.complete(teacher,task.id(),id,2);
+        assertEquals(409,assertThrows(CurriculumException.class,()->service.edit(teacher,task.id(),"Changed max",5,true,false,null)).status);
+        assertEquals(409,assertThrows(CurriculumException.class,()->service.edit(teacher,task.id(),"Changed mode",4,false,false,null)).status);
+    }
+    @Test void assessmentFailuresNeverCreateFlexibleAwards() throws Exception {
+        db.writeTransaction(c->{
+            exec(c,"INSERT INTO curriculum_class_teachers(semester,class,subject,teacher) VALUES(?,?,?,?)",id,id,id,id);
+            return null;
+        });
+        var task=service.create(teacher,scope,"Failed variable",4,true);
+        service.setStageAssessment(teacher,id,scope,Curriculum.ActiveStageType.FLEXIBLE,task.id(),Curriculum.AssessmentStatus.FAILED_ONCE,2);
+        assertEquals(0,scalar("SELECT COUNT(*) FROM completed_flexible_tasks WHERE student=? AND flexible_task=?",id,task.id()));
+        service.setStageAssessment(teacher,id,scope,Curriculum.ActiveStageType.FLEXIBLE,task.id(),Curriculum.AssessmentStatus.FAILED_TWICE,2);
+        assertEquals(0,scalar("SELECT COUNT(*) FROM completed_flexible_tasks WHERE student=? AND flexible_task=?",id,task.id()));
+    }
+    @Test void completionHandlerAcceptsOptionalFixedAwardAndRequiresVariableAward() throws Exception {
+        var fixed=service.create(teacher,scope,"Handler fixed",4);
+        String fixedPayload="{\"taskId\":"+fixed.id()+",\"studentId\":"+id+"}";
+        assertEquals(Status.OK,request(Teacher.get(id),"/complete-flexible-task",fixedPayload).getStatus());
+        var variable=service.create(teacher,scope,"Handler variable",4,true);
+        String variablePayload="{\"taskId\":"+variable.id()+",\"studentId\":"+id+"}";
+        assertEquals(Status.BAD_REQUEST,request(Teacher.get(id),"/complete-flexible-task",variablePayload).getStatus());
+        assertEquals(Status.OK,request(Teacher.get(id),"/complete-flexible-task",variablePayload.replace("}",",\"awardedTokens\":2}")).getStatus());
+        assertEquals(2,scalar("SELECT awarded_tokens FROM completed_flexible_tasks WHERE student=? AND flexible_task=?",id,variable.id()));
+    }
+    @Test void transferPreservesVariableAwardAndIgnoresClientTokenHint() throws Exception {
+        var source=service.create(teacher,scope,"Variable source",4,true);
+        var target=service.create(other,secondScope(),"Variable target",4,true);
+        service.complete(teacher,source.id(),id,2);
+        var preview=service.transferPreview(admin,id,secondScope());
+        assertEquals(2,((Map<?,?>)((List<?>)preview.get("compatibleTargets")).get(0)).get("awardedTokens"));
+        service.transfer(admin,id,scope,secondScope(),List.of(new Curriculum.Transfer(source.id(),target.id(),99)));
+        assertEquals(2,scalar("SELECT awarded_tokens FROM completed_flexible_tasks WHERE student=? AND flexible_task=?",id,target.id()));
+    }
+    @Test void incompatibleVariableTransferIsBlockedAndLegacyNullResolvesToMaximum() throws Exception {
+        var variableSource=service.create(teacher,scope,"Variable source",4,true);
+        var fixedTarget=service.create(other,secondScope(),"Fixed target",4);
+        service.complete(teacher,variableSource.id(),id,2);
+        assertEquals(409,assertThrows(CurriculumException.class,()->service.transfer(admin,id,scope,secondScope(),List.of(new Curriculum.Transfer(variableSource.id(),fixedTarget.id(),4)))).status);
+        db.writeTransaction(c->{exec(c,"DELETE FROM completed_flexible_tasks WHERE student=? AND flexible_task=?",id,variableSource.id());return null;});
+
+        var legacySource=service.create(teacher,scope,"Legacy source",4);
+        var legacyTarget=service.create(other,secondScope(),"Legacy target",4);
+        db.writeTransaction(c->{exec(c,"INSERT INTO completed_flexible_tasks(student,flexible_task,awarded_tokens) VALUES(?,?,NULL)",id,legacySource.id());return null;});
+        service.transfer(admin,id,scope,secondScope(),List.of(new Curriculum.Transfer(legacySource.id(),legacyTarget.id(),0)));
+        assertEquals(4,scalar("SELECT awarded_tokens FROM completed_flexible_tasks WHERE student=? AND flexible_task=?",id,legacyTarget.id()));
+    }
     @Test void assignmentAndCompletionRaceCannotMixContexts() throws Exception {
         central(70);var a=service.create(teacher,scope,"A",35);var b=service.create(other,secondScope(),"B",35);
         ExecutorService pool=Executors.newFixedThreadPool(2);CountDownLatch gate=new CountDownLatch(1);
@@ -1155,8 +1232,7 @@ class CurriculumTest {
                 List.of(new Curriculum.Transfer(a.id(),b.id(),5),new Curriculum.Transfer(a.id(),b2.id(),5)),
                 List.of(new Curriculum.Transfer(a.id(),b.id(),5),new Curriculum.Transfer(a2.id(),b.id(),5)),
                 List.of(new Curriculum.Transfer(b.id(),a.id(),5),new Curriculum.Transfer(a2.id(),b2.id(),5)),
-                List.of(new Curriculum.Transfer(a.id(),a2.id(),5),new Curriculum.Transfer(a2.id(),b2.id(),5)),
-                List.of(new Curriculum.Transfer(a.id(),b.id(),4),new Curriculum.Transfer(a2.id(),b2.id(),5)))) {
+                List.of(new Curriculum.Transfer(a.id(),a2.id(),5),new Curriculum.Transfer(a2.id(),b2.id(),5)))) {
             assertThrows(CurriculumException.class,()->service.transfer(admin,id,scope,secondScope(),mappings));
             assertEquals(0,scalar("SELECT COUNT(*) FROM curriculum_completion_transfers WHERE student=?",id));
         }
