@@ -71,6 +71,23 @@ class VariableFlexibleTaskAwardsMigrationTest {
         }
     }
 
+    @Test
+    void migrationExecutionAcceptsSQLiteAlterTableChecks() throws Exception {
+        try (Connection c = database()) {
+            exec(c, "CREATE TABLE flexible_tasks(id INTEGER PRIMARY KEY)");
+            exec(c, "CREATE TABLE completed_flexible_tasks(student INTEGER,flexible_task INTEGER)");
+            exec(c, "INSERT INTO flexible_tasks(id) VALUES(1)");
+            exec(c, "INSERT INTO completed_flexible_tasks(student,flexible_task) VALUES(1,1)");
+            PreparedStatementSupplier supplier = c::prepareStatement;
+
+            supplier.executeUpdate("ALTER TABLE flexible_tasks ADD COLUMN variable_tokens INTEGER NOT NULL DEFAULT 0 CHECK(variable_tokens IN (0, 1))");
+            supplier.executeUpdate("ALTER TABLE completed_flexible_tasks ADD COLUMN awarded_tokens INTEGER CHECK(awarded_tokens IS NULL OR awarded_tokens BETWEEN 0 AND 105)");
+
+            assertEquals(0, scalar(c, "SELECT variable_tokens FROM flexible_tasks"));
+            assertNull(value(c, "SELECT awarded_tokens FROM completed_flexible_tasks"));
+        }
+    }
+
     private static Connection database() throws SQLException {
         Connection c = DriverManager.getConnection("jdbc:sqlite::memory:");
         try (Statement s = c.createStatement()) { s.execute("PRAGMA foreign_keys=ON"); }

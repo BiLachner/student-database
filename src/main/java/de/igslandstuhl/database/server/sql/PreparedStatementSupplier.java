@@ -14,7 +14,11 @@ public interface PreparedStatementSupplier {
     PreparedStatement prepareStatement(String query) throws SQLException;
     public default void executeUpdate(String update) throws SQLException {
         PreparedStatement stmt = prepareStatement(update);
-        stmt.executeUpdate();
+        // SQLite's JDBC driver can report "Query returns results" for some
+        // DDL statements (notably ALTER TABLE ... ADD COLUMN ... CHECK(...))
+        // even though they are schema updates. execute() is the JDBC-neutral
+        // operation for migration/table scripts and handles both DDL and DML.
+        stmt.execute();
         stmt.close();
     }
 }
