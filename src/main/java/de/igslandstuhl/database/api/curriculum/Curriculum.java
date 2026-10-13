@@ -599,12 +599,15 @@ public final class Curriculum {
                 scope.teacherId(),scope.subjectId(),scope.classId(),scope.semesterId());
     }
     private static List<Map<String,Object>> plannedFlexibleTasks(Connection c,Scope scope) throws SQLException {
-        if(individualSubject(c,scope.subjectId())) return rows(c,"SELECT t.id,t.name,t.tokens,t.variable_tokens AS variableTokens,p.id AS topicId,p.name AS topicName FROM flexible_tasks t LEFT JOIN flexible_task_topics m ON m.flexible_task=t.id LEFT JOIN flexible_topics p ON p.id=m.flexible_topic WHERE t.course_group=? ORDER BY t.id",resolveScope(c,scope).courseGroupId());
-        return rows(c,"SELECT t.id,t.name,t.tokens,t.variable_tokens AS variableTokens,p.id AS topicId,p.name AS topicName FROM flexible_tasks t "
+        List<Map<String,Object>> result;
+        if(individualSubject(c,scope.subjectId())) result=rows(c,"SELECT t.id,t.name,t.tokens,t.variable_tokens AS variableTokens,p.id AS topicId,p.name AS topicName FROM flexible_tasks t LEFT JOIN flexible_task_topics m ON m.flexible_task=t.id LEFT JOIN flexible_topics p ON p.id=m.flexible_topic WHERE t.course_group=? ORDER BY t.id",resolveScope(c,scope).courseGroupId());
+        else result=rows(c,"SELECT t.id,t.name,t.tokens,t.variable_tokens AS variableTokens,p.id AS topicId,p.name AS topicName FROM flexible_tasks t "
                 + "LEFT JOIN flexible_task_topics m ON m.flexible_task=t.id LEFT JOIN flexible_topics p ON p.id=m.flexible_topic "
                 + "AND p.owner_teacher=t.owner_teacher AND p.subject=t.subject AND p.class=t.class AND p.semester=t.semester AND p.grade=t.grade "
                 + "WHERE t.owner_teacher=? AND t.subject=? AND t.class=? AND t.semester=? ORDER BY t.id",
                 scope.teacherId(),scope.subjectId(),scope.classId(),scope.semesterId());
+        result.forEach(task -> task.put("variableTokens", integer(task,"variableTokens") == 1));
+        return result;
     }
     public Map<String,Object> flexibleStructure(Actor actor,Scope scope) throws SQLException {
         return transaction(c->{authorize(c,actor,scope,false);
