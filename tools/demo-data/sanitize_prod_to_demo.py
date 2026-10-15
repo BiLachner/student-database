@@ -11,7 +11,6 @@ import argparse
 import json
 import os
 import re
-import shutil
 import sqlite3
 import sys
 import tempfile
@@ -20,6 +19,20 @@ from pathlib import Path
 BLOCKED = 20
 STAGED_ROOT = Path("/srv/arcanum/dev/validation")
 FORBIDDEN = ("/srv/arcanum/prod", "/srv/arcanum/demo")
+TABLE_ACTIONS = {"retain", "clear", "synthetic_identity", "synthetic_performance", "block"}
+SYNTHETIC_EXTENDED_TABLES = {
+    "attendance_events": {"action": "synthetic_performance", "columns": ["id", "student", "occurred_at", "status"]},
+    "attendance_teacher_preferences": {"action": "clear", "columns": ["teacher", "preference"]},
+    "attendance_locations": {"action": "retain", "columns": ["id", "name"]},
+    "permissions": {"action": "retain", "columns": ["name", "description"]},
+    "permnodes": {"action": "retain", "columns": ["permission", "node"]},
+    "user_roles": {"action": "clear", "columns": ["username", "role"]},
+    "rooms": {"action": "retain", "columns": ["id", "name"]},
+    "completed_special_tasks": {"action": "synthetic_performance", "columns": ["student", "task", "completed_at"]},
+    "special_tasks": {"action": "retain", "columns": ["id", "name", "tokens"]},
+    "student_attendance": {"action": "synthetic_performance", "columns": ["student", "date", "status"]},
+    "curriculum_release_audit": {"action": "clear", "columns": ["id", "actor", "event"]},
+}
 
 KNOWN_TABLES = {
     "admins", "archived_subjects", "archived_teachers", "classes",
@@ -125,16 +138,42 @@ def block(message: str) -> None:
     raise BlockedError(message)
 
 
-def safe_path(path: Path, *, output: bool = False) -> Path:
+def safe_path(path: Path, *, output: bool = False, stage_root: Path = STAGED_ROOT) -> Path:
     path = path.expanduser().absolute()
     resolved = Path(os.path.realpath(path))
     text = str(resolved)
     if any(text == root or text.startswith(root + "/") for root in FORBIDDEN):
         block("live PROD/DEMO paths are refused")
-    if output and not str(resolved).startswith(str(STAGED_ROOT) + "/"):
-        block("output must be below the controlled DEV validation root")
+    if output:
+        stage = Path(os.path.realpath(stage_root)).absolute()
+        if not str(resolved).startswith(str(stage) + "/"):
+            block("output must be below the explicitly configured protected stage root")
+        if any(str(resolved) == root or str(resolved).startswith(root + "/") for root in FORBIDDEN):
+            block("output must not be an active PROD/DEMO path")
     if path.is_symlink() or (path.exists() and resolved != path):
         block("symlinked paths are refused")
+    return path
+
+
+def safe_source_path(path: Path, *, source_root: Path | None = None,
+                     allow_prod_read_only: bool = False) -> Path:
+    path = path.expanduser().absolute()
+    resolved = Path(os.path.realpath(path))
+    if path.is_symlink() or (path.exists() and resolved != path):
+        block("symlinked source paths are refused")
+    text = str(resolved)
+    in_prod = text == "/srv/arcanum/prod" or text.startswith("/srv/arcanum/prod/")
+    in_demo = text == "/srv/arcanum/demo" or text.startswith("/srv/arcanum/demo/")
+    if in_demo or (in_prod and not allow_prod_read_only):
+        block("source is an active PROD/DEMO path without explicit read-only authorization")
+    if in_prod and not text.startswith("/srv/arcanum/prod/shared/"):
+        block("PROD source must be below /srv/arcanum/prod/shared")
+    if source_root is not None:
+        root = Path(os.path.realpath(source_root)).absolute()
+        if not text.startswith(str(root) + "/"):
+            block("source is outside the explicitly configured source root")
+    if not path.is_file():
+        block("source database is missing")
     return path
 
 
@@ -148,7 +187,7 @@ def read_json(path: Path) -> dict:
     return data
 
 
-def check_provenance(data: dict) -> None:
+def check_provenance(data: dict, reviewed_tables: set[str] | None = None) -> None:
     if data.get("kind") != "arcanum-sanitized-positive-list-v1":
         block("missing or invalid sanitized positive-list provenance")
     if data.get("source_environment") != "prod":
@@ -157,6 +196,8 @@ def check_provenance(data: dict) -> None:
         block("raw PROD database must never be marked as an active DEMO database")
     if not data.get("schema_commit") or not data.get("reviewed_tables"):
         block("provenance lacks schema commit or reviewed table list")
+    if reviewed_tables is not None and set(data.get("reviewed_tables", [])) != reviewed_tables:
+        block("provenance table list does not match the explicit table policy")
     if set(data.get("reviewed_text_fields", [])) != REVIEWED_TEXT_FIELDS:
         block("provenance lacks the exact reviewed text-field policy")
 
@@ -177,21 +218,65 @@ def table_names(db: sqlite3.Connection) -> set[str]:
     )}
 
 
-def require_schema(db: sqlite3.Connection) -> None:
+def load_table_policy(path: Path | None) -> dict[str, dict]:
+    if path is None:
+        policy = {}
+        for table, columns in KNOWN_COLUMNS.items():
+            action = "retain"
+            if table in PERFORMANCE_TABLES:
+                action = "synthetic_performance"
+            elif table in {"students", "teachers", "admins"}:
+                action = "synthetic_identity"
+            policy[table] = {"action": action, "columns": sorted(columns)}
+        return policy
+    data = read_json(path)
+    if data.get("kind") != "arcanum-sanitizer-table-policy-v1":
+        block("missing or invalid explicit table policy")
+    if not data.get("schema_commit") or not data.get("release"):
+        block("table policy lacks schema commit or release provenance")
+    tables = data.get("tables")
+    if not isinstance(tables, dict) or not tables:
+        block("explicit table policy has no tables")
+    policy = {}
+    for table, item in tables.items():
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", str(table)) or not isinstance(item, dict):
+            block("table policy contains an invalid table entry")
+        action = item.get("action")
+        columns = item.get("columns")
+        sensitive = item.get("sensitive", False)
+        if action not in TABLE_ACTIONS or not isinstance(columns, list) or not all(isinstance(c, str) for c in columns) or not isinstance(sensitive, bool):
+            block(f"table policy entry is incomplete: {table}")
+        if sensitive and action == "retain":
+            block(f"sensitive table may not be retained: {table}")
+        policy[table] = {"action": action, "columns": sorted(set(columns)), "sensitive": sensitive}
+    for table in PERFORMANCE_TABLES:
+        if table in policy and policy[table]["action"] != "synthetic_performance":
+            block(f"individual-performance table may not be retained: {table}")
+    return policy
+
+
+def require_schema(db: sqlite3.Connection, policy: dict[str, dict]) -> None:
     names = table_names(db)
-    unknown = sorted(names - KNOWN_TABLES)
+    unknown = sorted(names - set(policy))
+    missing_policy_tables = sorted(set(policy) - names)
     missing = sorted({"classes", "students", "teachers", "subjects", "semesters",
                       "topics", "tasks", "student_curriculum_contexts",
                       "flexible_tasks", "completed_flexible_tasks"} - names)
     if unknown:
         block("unreviewed tables present: " + ",".join(unknown))
+    if missing_policy_tables:
+        block("table policy names absent from database: " + ",".join(missing_policy_tables))
     if missing:
         block("required tables missing: " + ",".join(missing))
     for table in sorted(names):
         columns = {r[1] for r in db.execute(f'PRAGMA table_info("{table}")')}
-        unknown_columns = sorted(columns - KNOWN_COLUMNS.get(table, set()))
+        expected = set(policy[table]["columns"])
+        unknown_columns = sorted(columns - expected)
+        missing_columns = sorted(expected - columns)
         if unknown_columns:
             block(f"{table} has unreviewed columns: {','.join(unknown_columns)}")
+        if missing_columns:
+            block(f"{table} is missing reviewed columns: {','.join(missing_columns)}")
     for table, required in {
         "students": {"id", "first_name", "last_name", "email", "password", "class"},
         "teachers": {"id", "first_name", "last_name", "email", "password"},
@@ -295,6 +380,8 @@ def check_text_boundary(db: sqlite3.Connection) -> None:
 
 
 def account_map(data: dict, table: str, ids: list[int]) -> dict[int, dict]:
+    if data.get("credential_source") not in {"existing-demo-approved", "new-demo-secret"}:
+        block("account manifest lacks approved DEMO credential provenance")
     raw = data.get(table)
     if not isinstance(raw, dict):
         block(f"synthetic account map has no {table} map")
@@ -306,7 +393,18 @@ def account_map(data: dict, table: str, ids: list[int]) -> dict[int, dict]:
         needed = ("username", "password_hash") if table == "admins" else ("first_name", "last_name", "email", "password")
         if any(not isinstance(entry.get(key), str) or not entry[key].strip() for key in needed):
             block(f"incomplete synthetic {table} account mapping")
+        values = [entry[key].strip() for key in needed]
+        if any("prod" in value.lower() or "default" in value.lower() or "changeme" in value.lower() for value in values):
+            block(f"{table} account mapping contains a PROD/default credential marker")
+        if table == "admins":
+            if not entry["username"].startswith("demo-"):
+                block("synthetic admin username must use the demo- namespace")
+        elif not (entry["email"].startswith("demo.") and entry["email"].endswith("@example.invalid")):
+            block(f"synthetic {table} email must use the demo example.invalid namespace")
         result[identifier] = entry
+    extra = sorted(set(raw) - {str(identifier) for identifier in ids})
+    if extra:
+        block(f"synthetic {table} account map contains unmapped source IDs")
     return result
 
 
@@ -331,9 +429,47 @@ def rename_classes(db: sqlite3.Connection) -> None:
 
 
 def clear_performance(db: sqlite3.Connection) -> None:
-    for table in PERFORMANCE_TABLES:
+    # Delete children before completed_flexible_tasks, which is referenced by
+    # curriculum_completion_transfers.  Foreign-key enforcement stays on.
+    order = (
+        "curriculum_completion_transfers", "student_active_curriculum_stages",
+        "student_curriculum_stage_assessments", "student_subject_requests",
+        "student_topics", "taskstats", "completed_flexible_tasks",
+        "completed_individual_tasks", "completed_unscheduled_tasks",
+        "student_graduation_history",
+    )
+    for table in order:
         if table in table_names(db):
             db.execute(f'DELETE FROM "{table}"')
+
+
+def purge_allowed_historical_fk_violations(db: sqlite3.Connection,
+                                           policy: dict[str, dict]) -> None:
+    """Remove only orphan rows in tables explicitly marked disposable.
+
+    An orphan in a retained/current table is a hard block; there is no blanket
+    deletion of the PROD baseline.
+    """
+    violations = db.execute("PRAGMA foreign_key_check").fetchall()
+    for table, rowid, _parent, _fkid in violations:
+        item = policy.get(table)
+        if not item or item["action"] not in {"clear", "synthetic_performance"} or rowid is None:
+            block(f"current or unexplained foreign-key violation in retained table: {table}")
+        db.execute(f'DELETE FROM "{table}" WHERE rowid=?', (rowid,))
+
+
+def apply_table_policy(db: sqlite3.Connection, policy: dict[str, dict]) -> None:
+    for table, item in sorted(policy.items()):
+        if item["action"] == "clear":
+            db.execute(f'DELETE FROM "{table}"')
+        elif item["action"] == "synthetic_performance":
+            db.execute(f'DELETE FROM "{table}"')
+        elif item["action"] in {"synthetic_identity", "retain"}:
+            continue
+        elif item["action"] == "block":
+            block(f"table is explicitly blocked by policy: {table}")
+        else:
+            block(f"table has no executable policy: {table}")
 
 
 def create_synthetic_progress(db: sqlite3.Connection) -> None:
@@ -385,43 +521,75 @@ def validate_output(db: sqlite3.Connection, source_ids: dict[str, set[int]], ref
         block("variable flexible award exceeds task maximum")
 
 
-def transform(source: Path, output: Path, provenance: Path, accounts: Path) -> None:
-    check_provenance(read_json(provenance))
+def sqlite_online_backup(source: Path, output: Path) -> None:
+    """Create a consistent snapshot using SQLite's online backup API.
+
+    This is safe for a source using WAL: SQLite coordinates the read snapshot
+    instead of copying only the main database file.
+    """
+    output.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if output.exists():
+        block("output already exists; use a new immutable staging directory")
+    with connect(source, True) as source_db, sqlite3.connect(output) as target_db:
+        source_db.execute("PRAGMA query_only=ON")
+        source_db.backup(target_db, pages=256, sleep=0.01)
+        target_db.execute("PRAGMA journal_mode=DELETE")
+        target_db.commit()
+    os.chmod(output, 0o600)
+
+
+def remove_incomplete_output(output: Path) -> None:
+    """Remove only the newly-created, inactive stage artifact after failure."""
+    for candidate in (output, Path(str(output) + "-wal"), Path(str(output) + "-shm")):
+        if candidate.exists() or candidate.is_symlink():
+            candidate.unlink()
+
+
+def transform(source: Path, output: Path, provenance: Path, accounts: Path,
+              policy_path: Path | None = None, stage_root: Path = STAGED_ROOT) -> None:
+    policy = load_table_policy(policy_path)
+    check_provenance(read_json(provenance), set(policy))
     if not source.is_file() or source.is_symlink():
         block("staged source database is missing or symlinked")
-    output.parent.mkdir(parents=True, exist_ok=True)
+    output = safe_path(output, output=True, stage_root=stage_root)
     if output.exists():
         block("output already exists; use a new immutable staging directory")
     with connect(source, True) as source_db:
-        require_schema(source_db)
+        require_schema(source_db, policy)
         check_text_boundary(source_db)
         source_ids = {table: {r[0] for r in source_db.execute(f'SELECT id FROM "{table}"')} for table in ("students", "teachers")}
         source_ids["classes"] = {r[0] for r in source_db.execute("SELECT id FROM classes")}
         reference = fachliche_referenz(source_db)
-        shutil.copyfile(source, output)
-    with connect(output, False) as db:
-        require_schema(db)
-        normalize_subject_type_schema(db)
-        account_data = read_json(accounts)
-        student_map = account_map(account_data, "students", sorted(source_ids["students"]))
-        teacher_map = account_map(account_data, "teachers", sorted(source_ids["teachers"]))
-        for sid, row in student_map.items():
-            db.execute("UPDATE students SET first_name=?,last_name=?,email=?,password=? WHERE id=?", (row["first_name"], row["last_name"], row["email"], row["password"], sid))
-        for tid, row in teacher_map.items():
-            db.execute("UPDATE teachers SET first_name=?,last_name=?,email=?,password=? WHERE id=?", (row["first_name"], row["last_name"], row["email"], row["password"], tid))
-        if "admins" in table_names(db):
-            admin_ids = [r[0] for r in db.execute("SELECT rowid FROM admins")]
-            admin_map = account_map(account_data, "admins", admin_ids)
-            for rowid, row in admin_map.items():
-                db.execute("UPDATE admins SET username=?,password_hash=? WHERE rowid=?", (row["username"], row["password_hash"], rowid))
-        rename_classes(db)
-        clear_performance(db)
-        create_synthetic_progress(db)
-        validate_output(db, source_ids, reference)
-        db.commit()
+    try:
+        sqlite_online_backup(source, output)
+        with connect(output, False) as db:
+            require_schema(db, policy)
+            normalize_subject_type_schema(db)
+            account_data = read_json(accounts)
+            apply_table_policy(db, policy)
+            student_map = account_map(account_data, "students", sorted(source_ids["students"]))
+            teacher_map = account_map(account_data, "teachers", sorted(source_ids["teachers"]))
+            for sid, row in student_map.items():
+                db.execute("UPDATE students SET first_name=?,last_name=?,email=?,password=? WHERE id=?", (row["first_name"], row["last_name"], row["email"], row["password"], sid))
+            for tid, row in teacher_map.items():
+                db.execute("UPDATE teachers SET first_name=?,last_name=?,email=?,password=? WHERE id=?", (row["first_name"], row["last_name"], row["email"], row["password"], tid))
+            if "admins" in table_names(db):
+                admin_ids = [r[0] for r in db.execute("SELECT rowid FROM admins")]
+                admin_map = account_map(account_data, "admins", admin_ids)
+                for rowid, row in admin_map.items():
+                    db.execute("UPDATE admins SET username=?,password_hash=? WHERE rowid=?", (row["username"], row["password_hash"], rowid))
+            rename_classes(db)
+            clear_performance(db)
+            purge_allowed_historical_fk_violations(db, policy)
+            create_synthetic_progress(db)
+            validate_output(db, source_ids, reference)
+            db.commit()
+    except Exception:
+        remove_incomplete_output(output)
+        raise
 
 
-def make_fixture(root: Path, *, legacy_subject_type_schema: bool = False) -> tuple[Path, Path, Path]:
+def make_fixture(root: Path, *, legacy_subject_type_schema: bool = False) -> tuple[Path, Path, Path, Path]:
     source, accounts, provenance = root / "source.db", root / "accounts.json", root / "provenance.json"
     db = sqlite3.connect(source)
     db.executescript("""
@@ -435,17 +603,26 @@ def make_fixture(root: Path, *, legacy_subject_type_schema: bool = False) -> tup
       CREATE TABLE semesters(id INTEGER PRIMARY KEY,label TEXT NOT NULL,position INTEGER NOT NULL,school_year INTEGER NOT NULL,archived INTEGER NOT NULL DEFAULT 0,FOREIGN KEY(school_year) REFERENCES school_years(id));
       CREATE TABLE topics(id INTEGER PRIMARY KEY,name TEXT NOT NULL,subject INTEGER NOT NULL,grade INTEGER NOT NULL,resource TEXT,number INTEGER NOT NULL,semester INTEGER,FOREIGN KEY(subject) REFERENCES subjects(id),FOREIGN KEY(semester) REFERENCES semesters(id));
       CREATE TABLE tasks(id INTEGER PRIMARY KEY,topic INTEGER NOT NULL,name TEXT NOT NULL,niveau INTEGER NOT NULL,stage_number INTEGER NOT NULL,tokens INTEGER NOT NULL,FOREIGN KEY(topic) REFERENCES topics(id));
-      CREATE TABLE flexible_tasks(id INTEGER PRIMARY KEY,owner_teacher INTEGER NOT NULL,subject INTEGER NOT NULL,class INTEGER NOT NULL,semester INTEGER NOT NULL,grade INTEGER NOT NULL,name TEXT NOT NULL,tokens INTEGER NOT NULL,variable_tokens INTEGER NOT NULL DEFAULT 0,FOREIGN KEY(owner_teacher) REFERENCES teachers(id),FOREIGN KEY(subject) REFERENCES subjects(id),FOREIGN KEY(class) REFERENCES classes(id),FOREIGN KEY(semester) REFERENCES semesters(id));
-      CREATE TABLE completed_flexible_tasks(student INTEGER NOT NULL,flexible_task INTEGER NOT NULL,awarded_tokens INTEGER,PRIMARY KEY(student,flexible_task),FOREIGN KEY(student) REFERENCES students(id),FOREIGN KEY(flexible_task) REFERENCES flexible_tasks(id));
-      CREATE TABLE taskstats(student INTEGER NOT NULL,task INTEGER NOT NULL,status INTEGER NOT NULL,PRIMARY KEY(student,task),FOREIGN KEY(student) REFERENCES students(id),FOREIGN KEY(task) REFERENCES tasks(id));
-      CREATE TABLE student_curriculum_contexts(student INTEGER NOT NULL,subject INTEGER NOT NULL,semester INTEGER NOT NULL,teacher INTEGER NOT NULL,class INTEGER NOT NULL,grade INTEGER NOT NULL,PRIMARY KEY(student,subject,semester),FOREIGN KEY(student) REFERENCES students(id));
-      CREATE TABLE student_active_curriculum_stages(student INTEGER NOT NULL,subject INTEGER NOT NULL,semester INTEGER NOT NULL,central_task INTEGER,flexible_task INTEGER,PRIMARY KEY(student,subject),FOREIGN KEY(student) REFERENCES students(id),FOREIGN KEY(central_task) REFERENCES tasks(id));
-      CREATE TABLE student_subject_requests(student INTEGER NOT NULL,subject INTEGER NOT NULL,semester INTEGER NOT NULL,request_type TEXT NOT NULL);
-      CREATE TABLE student_curriculum_stage_assessments(student INTEGER NOT NULL,subject INTEGER NOT NULL,semester INTEGER NOT NULL,stage_type TEXT NOT NULL,stage_id INTEGER NOT NULL,status TEXT NOT NULL);
+      CREATE TABLE flexible_tasks(id INTEGER PRIMARY KEY,owner_teacher INTEGER NOT NULL,subject INTEGER NOT NULL,class INTEGER NOT NULL,semester INTEGER NOT NULL,grade INTEGER NOT NULL,name TEXT NOT NULL,tokens INTEGER NOT NULL,variable_tokens INTEGER NOT NULL DEFAULT 0,course_group INTEGER,FOREIGN KEY(owner_teacher) REFERENCES teachers(id),FOREIGN KEY(subject) REFERENCES subjects(id),FOREIGN KEY(class) REFERENCES classes(id),FOREIGN KEY(semester) REFERENCES semesters(id));
+      CREATE TABLE completed_flexible_tasks(student INTEGER NOT NULL,flexible_task INTEGER NOT NULL,last_updated TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,awarded_tokens INTEGER,PRIMARY KEY(student,flexible_task),FOREIGN KEY(student) REFERENCES students(id),FOREIGN KEY(flexible_task) REFERENCES flexible_tasks(id));
+      CREATE TABLE taskstats(student INTEGER NOT NULL,task INTEGER NOT NULL,status INTEGER NOT NULL,last_updated TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(student,task),FOREIGN KEY(student) REFERENCES students(id),FOREIGN KEY(task) REFERENCES tasks(id));
+      CREATE TABLE student_curriculum_contexts(student INTEGER NOT NULL,subject INTEGER NOT NULL,semester INTEGER NOT NULL,teacher INTEGER NOT NULL,class INTEGER NOT NULL,grade INTEGER NOT NULL,course_group INTEGER,PRIMARY KEY(student,subject,semester),FOREIGN KEY(student) REFERENCES students(id));
+      CREATE TABLE student_active_curriculum_stages(student INTEGER NOT NULL,subject INTEGER NOT NULL,semester INTEGER NOT NULL,central_task INTEGER,flexible_task INTEGER,last_updated TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(student,subject),FOREIGN KEY(student) REFERENCES students(id),FOREIGN KEY(central_task) REFERENCES tasks(id));
+      CREATE TABLE student_subject_requests(student INTEGER NOT NULL,subject INTEGER NOT NULL,semester INTEGER NOT NULL,request_type TEXT NOT NULL,last_updated TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);
+      CREATE TABLE student_curriculum_stage_assessments(student INTEGER NOT NULL,subject INTEGER NOT NULL,semester INTEGER NOT NULL,stage_type TEXT NOT NULL,stage_id INTEGER NOT NULL,status TEXT NOT NULL,last_updated TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE subject_grade_activation(subject INTEGER NOT NULL,grade INTEGER NOT NULL,PRIMARY KEY(subject,grade));
       CREATE TABLE curriculum_subject_types(subject INTEGER PRIMARY KEY,wpf INTEGER NOT NULL%s,mode TEXT NOT NULL%s,assignment_group TEXT);
       CREATE TABLE course_group_unique_indexes_migration_marker(id INTEGER PRIMARY KEY);
     """ % ("" if legacy_subject_type_schema else " DEFAULT 0 CHECK(wpf IN (0,1))", "" if legacy_subject_type_schema else " DEFAULT 'REGULAR' CHECK(mode IN ('REGULAR','INDIVIDUAL'))"))
+    # The fixture deliberately contains the complete reviewed table inventory.
+    # Empty generic tables model plugin/history tables without inventing data.
+    for table, columns in KNOWN_COLUMNS.items():
+        if table not in table_names(db):
+            ddl = ",".join(f'"{column}" TEXT' for column in sorted(columns))
+            db.execute(f'CREATE TABLE "{table}" ({ddl})')
+    for table, item in SYNTHETIC_EXTENDED_TABLES.items():
+        ddl = ",".join(f'"{column}" TEXT' for column in item["columns"])
+        db.execute(f'CREATE TABLE "{table}" ({ddl})')
     db.executemany("INSERT INTO classes VALUES(?,?,?,1)", [(10,"5a",5),(11,"5b",5),(12,"5c",5),(13,"5d",5),(20,"6a",6),(21,"6b",6),(22,"6c",6),(23,"6d",6)])
     db.executemany("INSERT INTO teachers VALUES(?,?,?,?,?)", [(1,"Prod","Teacher","prod.t1@example","prod-hash"),(2,"Prod","Teacher2","prod.t2@example","prod-hash")])
     db.executemany("INSERT INTO students VALUES(?,?,?,?,?,?,?,1)", [(101,"Prod","Student","prod.s1@example","prod-hash",10,1),(102,"Prod","Student2","prod.s2@example","prod-hash",20,1)])
@@ -463,20 +640,40 @@ def make_fixture(root: Path, *, legacy_subject_type_schema: bool = False) -> tup
     db.execute("INSERT INTO semesters VALUES(1,'2026_27_HJ1',1,1,0)")
     db.execute("INSERT INTO topics VALUES(1,'Zahlen',1,5,NULL,1,1)")
     db.execute("INSERT INTO tasks VALUES(1,1,'5 M 1.1.1 Zahlen',1,1,4)")
-    db.execute("INSERT INTO flexible_tasks VALUES(1,1,1,20,1,6,'Übung',5,1)")
-    db.executemany("INSERT INTO student_curriculum_contexts VALUES(?,?,?,?,?,?)", [(101,1,1,1,10,5),(102,1,1,1,20,6)])
-    db.execute("INSERT INTO taskstats VALUES(101,1,2)")
+    db.execute("INSERT INTO flexible_tasks VALUES(1,1,1,20,1,6,'Übung',5,1,NULL)")
+    db.executemany("INSERT INTO student_curriculum_contexts VALUES(?,?,?,?,?,?,?)", [(101,1,1,1,10,5,None),(102,1,1,1,20,6,None)])
+    db.execute("INSERT INTO taskstats(student,task,status) VALUES(101,1,2)")
     db.commit(); db.close()
-    accounts.write_text(json.dumps({"students":{"101":{"first_name":"Mara","last_name":"Muster","email":"demo.student.101@example.invalid","password":"SYNTHETIC_HASH_101"},"102":{"first_name":"Noah","last_name":"Nachweis","email":"demo.student.102@example.invalid","password":"SYNTHETIC_HASH_102"}},"teachers":{"1":{"first_name":"Leni","last_name":"Lehrerin","email":"demo.teacher.1@example.invalid","password":"SYNTHETIC_HASH_T1"},"2":{"first_name":"Toni","last_name":"Tutor","email":"demo.teacher.2@example.invalid","password":"SYNTHETIC_HASH_T2"}},"admins":{"1":{"username":"demo.admin","password_hash":"SYNTHETIC_HASH_A1"}}}, ensure_ascii=False), encoding="utf-8")
-    provenance.write_text(json.dumps({"kind":"arcanum-sanitized-positive-list-v1","source_environment":"prod","raw_database_active":False,"schema_commit":"synthetic-test","reviewed_tables":sorted(KNOWN_TABLES),"reviewed_text_fields":sorted(REVIEWED_TEXT_FIELDS)}), encoding="utf-8")
-    return source, accounts, provenance
+    accounts.write_text(json.dumps({"credential_source":"new-demo-secret","students":{"101":{"first_name":"Mara","last_name":"Muster","email":"demo.student.101@example.invalid","password":"DEMO_ONLY_101"},"102":{"first_name":"Noah","last_name":"Nachweis","email":"demo.student.102@example.invalid","password":"DEMO_ONLY_102"}},"teachers":{"1":{"first_name":"Leni","last_name":"Lehrerin","email":"demo.teacher.1@example.invalid","password":"DEMO_ONLY_T1"},"2":{"first_name":"Toni","last_name":"Tutor","email":"demo.teacher.2@example.invalid","password":"DEMO_ONLY_T2"}},"admins":{"1":{"username":"demo-admin","password_hash":"DEMO_ONLY_A1"}}}, ensure_ascii=False), encoding="utf-8")
+    policy = {}
+    for table, columns in KNOWN_COLUMNS.items():
+        action = "retain"
+        if table in PERFORMANCE_TABLES:
+            action = "synthetic_performance"
+        elif table in {"students", "teachers", "admins"}:
+            action = "synthetic_identity"
+        policy[table] = {"action": action, "columns": sorted(columns)}
+    policy.update(SYNTHETIC_EXTENDED_TABLES)
+    provenance.write_text(json.dumps({"kind":"arcanum-sanitized-positive-list-v1","source_environment":"prod","raw_database_active":False,"schema_commit":"synthetic-test","reviewed_tables":sorted(policy),"reviewed_text_fields":sorted(REVIEWED_TEXT_FIELDS)}), encoding="utf-8")
+    (root / "table-policy.json").write_text(json.dumps({"kind":"arcanum-sanitizer-table-policy-v1","schema_commit":"synthetic-test","release":"synthetic-test-release","tables":policy}), encoding="utf-8")
+    return source, accounts, provenance, root / "table-policy.json"
 
 
 def self_test() -> None:
     with tempfile.TemporaryDirectory(prefix="demo-sanitize-", dir="/srv/arcanum/dev/tmp") as directory:
-        root = Path(directory); source, accounts, provenance = make_fixture(root)
+        root = Path(directory); source, accounts, provenance, policy = make_fixture(root)
+        with sqlite3.connect(source) as wal_db:
+            assert wal_db.execute("PRAGMA journal_mode=WAL").fetchone()[0].lower() == "wal"
+            wal_db.execute("UPDATE topics SET name='Zahlen WAL'")
+            wal_db.commit()
+        backup = root / "wal-backup.db"
+        sqlite_online_backup(source, backup)
+        with connect(backup, True) as backup_db:
+            assert backup_db.execute("SELECT name FROM topics WHERE id=1").fetchone()[0] == "Zahlen WAL"
+        with connect(source, True) as source_db:
+            assert len(table_names(source_db)) == 59
         output = root / "out" / "database.db"; output.parent.mkdir()
-        transform(source, output, provenance, accounts)
+        transform(source, output, provenance, accounts, policy, root / "out")
         with connect(output, True) as db:
             expected_classes = {10:"5c", 11:"5a", 12:"5d", 13:"5b", 20:"6b", 21:"6c", 22:"6d", 23:"6a"}
             assert dict(db.execute("SELECT id,label FROM classes")) == expected_classes
@@ -494,45 +691,57 @@ def self_test() -> None:
             first_inventory = inventory(db)
         legacy_root = root / "legacy-schema"
         legacy_root.mkdir()
-        legacy_source, legacy_accounts, legacy_provenance = make_fixture(legacy_root, legacy_subject_type_schema=True)
+        legacy_source, legacy_accounts, legacy_provenance, legacy_policy = make_fixture(legacy_root, legacy_subject_type_schema=True)
         legacy_output = legacy_root / "out.db"
-        transform(legacy_source, legacy_output, legacy_provenance, legacy_accounts)
+        transform(legacy_source, legacy_output, legacy_provenance, legacy_accounts, legacy_policy, legacy_root)
         with connect(legacy_output, True) as db:
             ddl = db.execute("SELECT sql FROM sqlite_master WHERE name='curriculum_subject_types'").fetchone()[0].upper()
             assert "DEFAULT 0" in ddl and "CHECK(WPF IN (0,1))" in ddl
         repeat_root = root / "repeat"
         repeat_root.mkdir()
-        repeat_source, repeat_accounts, repeat_provenance = make_fixture(repeat_root)
+        repeat_source, repeat_accounts, repeat_provenance, repeat_policy = make_fixture(repeat_root)
         repeat_output = repeat_root / "out.db"
         repeat_output_2 = repeat_root / "out-2.db"
-        transform(repeat_source, repeat_output, repeat_provenance, repeat_accounts)
-        transform(repeat_source, repeat_output_2, repeat_provenance, repeat_accounts)
+        transform(repeat_source, repeat_output, repeat_provenance, repeat_accounts, repeat_policy, repeat_root)
+        transform(repeat_source, repeat_output_2, repeat_provenance, repeat_accounts, repeat_policy, repeat_root)
         with connect(repeat_output, True) as one, connect(repeat_output_2, True) as two:
             assert inventory(one) == inventory(two) == first_inventory
         blocked_root = root / "blocked"
         blocked_root.mkdir()
-        bad_source, bad_accounts, bad_provenance = make_fixture(blocked_root)
+        bad_source, bad_accounts, bad_provenance, bad_policy = make_fixture(blocked_root)
         with sqlite3.connect(bad_source) as bad_db:
             bad_db.execute("CREATE TABLE unreviewed_person_data(value TEXT)")
             bad_db.commit()
         try:
-            transform(bad_source, blocked_root / "out.db", bad_provenance, bad_accounts)
+            transform(bad_source, blocked_root / "out.db", bad_provenance, bad_accounts, bad_policy, blocked_root)
         except BlockedError:
             pass
         else:
             raise AssertionError("unknown table did not block")
         free_text_root = root / "free-text"
         free_text_root.mkdir()
-        text_source, text_accounts, text_provenance = make_fixture(free_text_root)
+        text_source, text_accounts, text_provenance, text_policy = make_fixture(free_text_root)
         with sqlite3.connect(text_source) as text_db:
             text_db.execute("UPDATE topics SET resource='unreviewed person note'")
             text_db.commit()
         try:
-            transform(text_source, free_text_root / "out.db", text_provenance, text_accounts)
+            transform(text_source, free_text_root / "out.db", text_provenance, text_accounts, text_policy, free_text_root)
         except BlockedError:
             pass
         else:
             raise AssertionError("unreviewed free text did not block")
+        credential_root = root / "bad-credentials"
+        credential_root.mkdir()
+        cred_source, cred_accounts, cred_provenance, cred_policy = make_fixture(credential_root)
+        bad_accounts = json.loads(cred_accounts.read_text(encoding="utf-8"))
+        bad_accounts["students"]["101"]["password"] = "prod-password-marker"
+        cred_accounts.write_text(json.dumps(bad_accounts), encoding="utf-8")
+        try:
+            transform(cred_source, credential_root / "out.db", cred_provenance, cred_accounts, cred_policy, credential_root)
+        except BlockedError:
+            assert not (credential_root / "out.db").exists()
+        else:
+            raise AssertionError("PROD credential marker did not block")
         try:
             safe_path(Path("/srv/arcanum/demo/shared/database.db"))
         except BlockedError:
@@ -548,26 +757,34 @@ def main() -> int:
     parser.add_argument("--output")
     parser.add_argument("--provenance")
     parser.add_argument("--accounts")
+    parser.add_argument("--table-policy", help="explicit reviewed policy for every source table")
+    parser.add_argument("--stage-root", default=str(STAGED_ROOT), help="protected output root")
+    parser.add_argument("--source-root", help="explicit read-only source root")
+    parser.add_argument("--allow-prod-read-only", action="store_true", help="allow only the PROD shared DB as a read-only source")
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--dry-run", action="store_true", help="validate source and print a non-sensitive inventory")
     args = parser.parse_args()
     try:
         if args.self_test:
             self_test(); return 0
-        required = (args.source, args.provenance) if args.dry_run else (args.source, args.output, args.provenance, args.accounts)
+        required = (args.source, args.provenance, args.table_policy) if args.dry_run else (args.source, args.output, args.provenance, args.accounts, args.table_policy)
         if not all(required):
             block("source and provenance are required for dry-run; output and accounts are additionally required for transform")
-        source = safe_path(Path(args.source))
+        source = safe_source_path(Path(args.source), source_root=Path(args.source_root) if args.source_root else None,
+                                   allow_prod_read_only=args.allow_prod_read_only)
         provenance = safe_path(Path(args.provenance))
-        accounts = safe_path(Path(args.accounts))
+        policy_path = safe_path(Path(args.table_policy))
+        stage_root = safe_path(Path(args.stage_root))
         if args.dry_run:
-            check_provenance(read_json(provenance))
+            policy = load_table_policy(policy_path)
+            check_provenance(read_json(provenance), set(policy))
             with connect(source, True) as db:
-                require_schema(db)
+                require_schema(db, policy)
                 check_text_boundary(db)
                 print(json.dumps(inventory(db), ensure_ascii=False, sort_keys=True))
             return 0
-        transform(source, safe_path(Path(args.output), output=True), provenance, accounts)
+        accounts = safe_path(Path(args.accounts))
+        transform(source, safe_path(Path(args.output), output=True, stage_root=stage_root), provenance, accounts, policy_path, stage_root)
         print("SANITIZE_PASS synthetic output created; identity values withheld")
         return 0
     except BlockedError as exc:
