@@ -1066,9 +1066,20 @@ public final class Curriculum {
                             studentId,scope.subjectId(),scope.semesterId(),stageId);
                 }
             } else {
-                write(c,"INSERT INTO student_curriculum_stage_assessments(student,subject,semester,stage_type,stage_id,status,last_updated) VALUES(?,?,?,?,?,?,CURRENT_TIMESTAMP) "
-                        + "ON CONFLICT(student,subject,semester,stage_type,stage_id) DO UPDATE SET status=excluded.status,last_updated=CURRENT_TIMESTAMP",
-                        studentId,scope.subjectId(),scope.semesterId(),stageType.name(),stageId,status.name());
+                int failedAttempts = switch (status) {
+                    case FAILED_ONCE -> 1;
+                    case FAILED_TWICE -> 2;
+                    case LOCKED -> {
+                        var previous=rows(c,"SELECT failed_attempts FROM student_curriculum_stage_assessments "
+                                + "WHERE student=? AND subject=? AND semester=? AND stage_type=? AND stage_id=?",
+                                studentId,scope.subjectId(),scope.semesterId(),stageType.name(),stageId);
+                        yield previous.isEmpty() ? 0 : Math.min(2, integer(previous.get(0),"failed_attempts"));
+                    }
+                    default -> 0;
+                };
+                write(c,"INSERT INTO student_curriculum_stage_assessments(student,subject,semester,stage_type,stage_id,status,failed_attempts,last_updated) VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP) "
+                        + "ON CONFLICT(student,subject,semester,stage_type,stage_id) DO UPDATE SET status=excluded.status,failed_attempts=MAX(student_curriculum_stage_assessments.failed_attempts,excluded.failed_attempts),last_updated=CURRENT_TIMESTAMP",
+                        studentId,scope.subjectId(),scope.semesterId(),stageType.name(),stageId,status.name(),failedAttempts);
             }
             return null;
         });
@@ -1535,6 +1546,11 @@ public final class Curriculum {
                 CompletedFlexibleTask task=(CompletedFlexibleTask)entry;
                 flexibleDone.add(task.id()); flexibleProgress.put(task.id(),task);
             }
+            Map<String,Map<String,Object>> assessmentByStage=new HashMap<>();
+            for (var row : rows(c,"SELECT stage_type,stage_id,status,failed_attempts FROM student_curriculum_stage_assessments "
+                    + "WHERE student=? AND subject=? AND semester=?",studentId,subject,semester)) {
+                assessmentByStage.put(row.get("stage_type")+":"+row.get("stage_id"), row);
+            }
             var activeRows=rows(c,"SELECT a.subject,a.semester,a.central_task,a.flexible_task,ct.name AS centralName,ct.niveau AS centralNiveau,ft.name AS flexibleName "
                     + "FROM student_active_curriculum_stages a LEFT JOIN tasks ct ON ct.id=a.central_task LEFT JOIN flexible_tasks ft ON ft.id=a.flexible_task "
                     + "WHERE a.student=? AND a.subject=? AND a.semester=?",studentId,subject,semester);
@@ -1584,11 +1600,21 @@ public final class Curriculum {
             centralTasks.forEach(t->{int taskId=integer(t,"id");boolean completed=centralDone.contains(taskId);
                 t.put("completed",completed);
                 t.put("inProgress",!completed && finalActiveStage!=null && finalActiveStage.type()==ActiveStageType.CENTRAL && finalActiveStage.taskId()==taskId);
+                var assessment=assessmentByStage.get("CENTRAL:"+taskId);
+                if (assessment != null) {
+                    t.put("assessmentStatus",assessment.get("status"));
+                    t.put("failedAttempts",integer(assessment,"failed_attempts"));
+                }
             });
             flexibleTasks.forEach(t->{int taskId=integer(t,"id");boolean completed=flexibleDone.contains(taskId);
                 t.put("completed",completed);
                 if (completed) t.put("awardedTokens",flexibleProgress.get(taskId).awardedTokens());
                 t.put("inProgress",!completed && finalActiveStage!=null && finalActiveStage.type()==ActiveStageType.FLEXIBLE && finalActiveStage.taskId()==taskId);
+                var assessment=assessmentByStage.get("FLEXIBLE:"+taskId);
+                if (assessment != null) {
+                    t.put("assessmentStatus",assessment.get("status"));
+                    t.put("failedAttempts",integer(assessment,"failed_attempts"));
+                }
             });
             long centralPlanned=central(c,subject,grade,semester),flexiblePlanned=flexible(c,scope);
             var dateRows=rows(c,"SELECT y.label AS schoolYearLabel,s.label AS semesterLabel FROM semesters s JOIN school_years y ON y.id=s.school_year WHERE s.id=?",semester);

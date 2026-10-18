@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS student_curriculum_stage_assessments (
     stage_type TEXT NOT NULL,
     stage_id INTEGER NOT NULL,
     status TEXT NOT NULL,
+    failed_attempts INTEGER NOT NULL DEFAULT 0 CHECK (failed_attempts BETWEEN 0 AND 2),
     last_updated TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     PRIMARY KEY(student, subject, semester, stage_type, stage_id),

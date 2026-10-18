@@ -1818,6 +1818,33 @@ class CurriculumTest {
         assertTrue(result.getAsJsonArray("flexibleTasks").get(0).getAsJsonObject().get("completed").getAsBoolean());
         assertEquals(2,scalar("SELECT COUNT(*) FROM completed_flexible_tasks WHERE student=?",id));
     }
+    @Test void studentCatalogExposesOnlyCurrentUnpassedAssessmentStates() throws Exception {
+        db.writeTransaction(c->{exec(c,"INSERT INTO curriculum_class_teachers(semester,class,subject,teacher) VALUES(?,?,?,?)",id,id,id,id);return null;});
+        new CurriculumEnrollment(service).release(teacher,scope,topic,null,true);
+        int once=centralNamed("Once",5), twice=centralNamed("Twice",5), locked=centralNamed("Failed then locked",5);
+        int adminLocked=centralNamed("Administrative lock",5), passed=centralNamed("Failed then passed",5);
+        service.setStageAssessment(teacher,id,scope,Curriculum.ActiveStageType.CENTRAL,once,Curriculum.AssessmentStatus.FAILED_ONCE);
+        service.setStageAssessment(teacher,id,scope,Curriculum.ActiveStageType.CENTRAL,twice,Curriculum.AssessmentStatus.FAILED_TWICE);
+        service.setStageAssessment(teacher,id,scope,Curriculum.ActiveStageType.CENTRAL,locked,Curriculum.AssessmentStatus.FAILED_TWICE);
+        service.setStageAssessment(teacher,id,scope,Curriculum.ActiveStageType.CENTRAL,locked,Curriculum.AssessmentStatus.LOCKED);
+        service.setStageAssessment(teacher,id,scope,Curriculum.ActiveStageType.CENTRAL,adminLocked,Curriculum.AssessmentStatus.LOCKED);
+        service.setStageAssessment(teacher,id,scope,Curriculum.ActiveStageType.CENTRAL,passed,Curriculum.AssessmentStatus.FAILED_ONCE);
+        service.setStageAssessment(teacher,id,scope,Curriculum.ActiveStageType.CENTRAL,passed,Curriculum.AssessmentStatus.PASSED);
+
+        var tasks=jsonResponse(Student.get(id),"/my-curriculum-catalog",body()).getAsJsonArray("centralTasks");
+        Map<Integer,com.google.gson.JsonObject> byId=new java.util.HashMap<>();
+        for(var entry:tasks) { var task=entry.getAsJsonObject(); byId.put(task.get("id").getAsInt(),task); }
+        assertEquals("FAILED_ONCE",byId.get(once).get("assessmentStatus").getAsString());
+        assertEquals(1,byId.get(once).get("failedAttempts").getAsInt());
+        assertEquals("FAILED_TWICE",byId.get(twice).get("assessmentStatus").getAsString());
+        assertEquals("LOCKED",byId.get(locked).get("assessmentStatus").getAsString());
+        assertEquals(2,byId.get(locked).get("failedAttempts").getAsInt());
+        assertEquals("LOCKED",byId.get(adminLocked).get("assessmentStatus").getAsString());
+        assertEquals(0,byId.get(adminLocked).get("failedAttempts").getAsInt());
+        assertTrue(byId.get(passed).get("completed").getAsBoolean());
+        assertFalse(byId.get(passed).has("assessmentStatus"));
+    }
+
     @Test void catalogEnforcesStudentSessionAndNeverReturnsMissingContextsAsZero() throws Exception {
         for(String field:List.of("studentId","teacherId","classId","grade"))
             assertEquals(Status.BAD_REQUEST,request(Student.get(id),"/my-curriculum-catalog",body().replace("}",",\""+field+"\":1}")).getStatus());
