@@ -168,3 +168,43 @@ test('shared navigation script does not alter unrelated pages',()=>{
 test('teacher navigation uses safe static DOM updates only',()=>{
   assert.doesNotMatch(navigationScript,/innerHTML|outerHTML|insertAdjacentHTML|onclick/i);
 });
+
+test('attendance class multi-select becomes a collapsible checkbox picker kept in sync',async()=>{
+  const dom=shell('https://school.example.invalid/attendance',
+    `<main class="attendance"><nav>${navigation}</nav><form id="filters"><label>Datum<input id="date" type="date"></label><label>Klassen<select id="classes" multiple size="4"></select></label><label class="search">Schüler suchen<input id="search" type="search"></label><div class="actions"><button type="button" id="reset">Filter zurücksetzen</button></div></form><table><tbody id="rows"></tbody></table></main><p id="outside">x</p>`);
+  const {document,Event}=dom.window;
+  const tick=async()=>{ await Promise.resolve(); await new Promise(resolve=>dom.window.setTimeout(resolve,0)); };
+  try {
+    const select=document.getElementById('classes');
+    assert.equal(select.hidden,true);
+    assert.equal(select.form?.id,'filters');
+    const picker=document.querySelector('.attendance-class-picker');
+    assert.ok(picker);
+    assert.equal(document.querySelector('#attendance-class-picker-value').textContent,'Alle Klassen');
+
+    for (const name of ['5a','5b','5c','5d','6a']) select.append(new dom.window.Option(name,name));
+    await tick();
+    const boxes=picker.querySelectorAll('input[type="checkbox"]');
+    assert.equal(boxes.length,5);
+
+    let changes=0;
+    select.addEventListener('change',()=>changes++);
+    boxes[1].checked=true;
+    boxes[1].dispatchEvent(new Event('change',{bubbles:true}));
+    assert.equal(select.options[1].selected,true);
+    assert.equal(changes,1);
+    assert.equal(document.querySelector('#attendance-class-picker-value').textContent,'5b');
+
+    select.options[1].selected=false;
+    select.options[3].selected=true;
+    document.getElementById('rows').append(document.createElement('tr'));
+    await tick();
+    assert.equal(boxes[1].checked,false);
+    assert.equal(boxes[3].checked,true);
+    assert.equal(document.querySelector('#attendance-class-picker-value').textContent,'5d');
+
+    picker.open=true;
+    document.getElementById('outside').dispatchEvent(new dom.window.MouseEvent('click',{bubbles:true}));
+    assert.equal(picker.open,false);
+  } finally { dom.window.close(); }
+});
