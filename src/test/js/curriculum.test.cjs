@@ -59,7 +59,7 @@ async function setup(admin, options={}){
   const data=JSON.parse(requestOptions.body);requests.push({url,data});let body;let ok=true;
   if(options.response?.url===url)return {ok:false,status:options.response.status,text:async()=>options.response.body};
   const tasks=byClass.get(data.classId)||[];
-  if(options.enrollment && url==='/curriculum-enrollment-catalog')body={...catalog,gradeSubjects:options.gradeSubjects ?? [{grade:5,semesterId:20,subjectId:1}],activeSubjectIdsByGrade:options.activeSubjectIdsByGrade,nextSemesterPreview:{label:'2026_27_HJ2',schoolYear:'2026/27',semester:2,newSchoolYear:false,frameCopied:true,tutorsCopied:true},classes:options.enrollmentClasses ?? catalog.classes,subjects:options.enrollmentSubjects ?? [{id:1,name:'Math',wpf:0,mode:'REGULAR',assignmentGroup:null,typeExplicit:1},{id:4,name:'WPF Kunst',wpf:1,mode:'INDIVIDUAL',assignmentGroup:'WPF',typeExplicit:1},{id:5,name:'WPF Technik',wpf:1,mode:'INDIVIDUAL',assignmentGroup:'WPF',typeExplicit:1},{id:6,name:'Evangelische Religion',wpf:0,mode:'INDIVIDUAL',assignmentGroup:'RELIGION_ETHIK',typeExplicit:1},{id:7,name:'Ethik',wpf:0,mode:'INDIVIDUAL',assignmentGroup:'RELIGION_ETHIK',typeExplicit:1}],teaching:options.teaching ?? [{classId:10,subjectId:1,teacherId:7,semesterId:20},{classId:11,subjectId:1,teacherId:7,semesterId:20},{grade:5,subjectId:4,teacherId:7,semesterId:20},{grade:5,subjectId:5,teacherId:7,semesterId:20},{grade:5,subjectId:6,teacherId:7,semesterId:20},{grade:5,subjectId:7,teacherId:7,semesterId:20}]};
+ if(options.enrollment && url==='/curriculum-enrollment-catalog')body={...catalog,gradeSubjects:options.gradeSubjects ?? [{grade:5,semesterId:20,subjectId:1}],activeSubjectIdsByGrade:options.activeSubjectIdsByGrade,nextSemesterPreview:{label:'2026_27_HJ2',schoolYear:'2026/27',semester:2,newSchoolYear:false,frameCopied:true,tutorsCopied:true},classes:options.enrollmentClasses ?? catalog.classes,subjects:options.enrollmentSubjects ?? [{id:1,name:'Math',wpf:0,mode:'REGULAR',regularEligible:1,assignmentGroup:null,typeExplicit:1},{id:4,name:'WPF Kunst',wpf:1,mode:'INDIVIDUAL',regularEligible:0,assignmentGroup:'WPF',typeExplicit:1},{id:5,name:'WPF Technik',wpf:1,mode:'INDIVIDUAL',regularEligible:0,assignmentGroup:'WPF',typeExplicit:1},{id:6,name:'Evangelische Religion',wpf:0,mode:'INDIVIDUAL',regularEligible:0,assignmentGroup:'RELIGION_ETHIK',typeExplicit:1},{id:7,name:'Ethik',wpf:0,mode:'INDIVIDUAL',regularEligible:0,assignmentGroup:'RELIGION_ETHIK',typeExplicit:1}],teaching:options.teaching ?? [{classId:10,subjectId:1,teacherId:7,semesterId:20},{classId:11,subjectId:1,teacherId:7,semesterId:20},{grade:5,subjectId:4,teacherId:7,semesterId:20},{grade:5,subjectId:5,teacherId:7,semesterId:20},{grade:5,subjectId:6,teacherId:7,semesterId:20},{grade:5,subjectId:7,teacherId:7,semesterId:20}]};
   else if(options.enrollment && url==='/assign-grade-curriculum')body={students:2,assignments:2};
   else if(options.enrollment && url==='/assign-class-subject-teacher')body={...data};
   else if(options.enrollment && url==='/assign-individual-grade-teacher')body={ok:true};
@@ -850,6 +850,37 @@ test('admin enrollment-only dashboard initializes its matrix mount',async()=>{
   assert.equal(requests.filter(request=>request.url==='/curriculum-enrollment-catalog').length,1);
  } finally {dom.window.close();}
 });
+test('DEMO-shaped UNSPECIFIED core subjects render as regular in grades 5 and 6',async()=>{
+ const classes=[5,6].flatMap(grade=>[0,1,2,3].map(index=>({id:grade*10+index+1,label:`${grade}${String.fromCharCode(97+index)}`,grade})));
+ const subjects=[
+  {id:1,name:'Mathematik',subjectCode:'MATH',mode:'UNSPECIFIED',typeExplicit:0,regularEligible:1},
+  {id:2,name:'Englisch',subjectCode:'EN',mode:'UNSPECIFIED',typeExplicit:0,regularEligible:1},
+  {id:3,name:'Deutsch',subjectCode:'DE',mode:'UNSPECIFIED',typeExplicit:0,regularEligible:1},
+  {id:4,name:'Naturwissenschaften',subjectCode:'NAWI',mode:'UNSPECIFIED',typeExplicit:0,regularEligible:1},
+  {id:5,name:'Gesellschaftslehre',subjectCode:'GL',mode:'UNSPECIFIED',typeExplicit:0,regularEligible:1},
+  {id:6,name:'Explizit REGULAR',mode:'REGULAR',typeExplicit:1,regularEligible:true},
+  {id:7,name:'Religion',mode:'INDIVIDUAL',assignmentGroup:'RELIGION_ETHIK',regularEligible:0},
+  {id:8,name:'Ethik',mode:'INDIVIDUAL',assignmentGroup:'RELIGION_ETHIK',regularEligible:false},
+  {id:9,name:'Nicht aktiviert',mode:'REGULAR',typeExplicit:1,regularEligible:1}
+ ];
+ const activeSubjectIdsByGrade={5:[1,2,3,4,5,6],6:[1,2,3,4,5,6,7,8]};
+ const teaching=[]; for(const grade of [5,6]) for(const schoolClass of classes.filter(item=>item.grade===grade)) for(const subject of [1,2,3,4,5,6]) teaching.push({semesterId:20,classId:schoolClass.id,subjectId:subject,teacherId:7});
+ const {dom}=await setup(true,{enrollment:true,adminDashboard:true,enrollmentClasses:classes,enrollmentSubjects:subjects,activeSubjectIdsByGrade,teaching});
+ try {
+  const matrix=dom.window.document.querySelector('.admin-teacher-matrix');
+  for(const grade of [5,6]) {
+   const selector=matrix.querySelector('[data-teacher-matrix-grade]'); selector.value=String(grade); selector.dispatchEvent(new dom.window.Event('change')); await tick();
+   const table=matrix.querySelector('.admin-teacher-matrix-table'); assert.ok(table);
+   for(const name of ['Mathematik','Englisch','Deutsch','Naturwissenschaften','Gesellschaftslehre','Explizit REGULAR']) {
+    const row=[...table.rows].find(item=>item.querySelector('th')?.textContent===name); assert.ok(row,`${name} grade ${grade}`); assert.equal(row.querySelectorAll('select').length,4,`${name} class cells`);
+   }
+   assert.equal([...table.rows].filter(row=>row.querySelector('th')?.textContent==='Nicht aktiviert').length,0);
+   assert.equal([...table.rows].filter(row=>row.querySelector('th')?.textContent==='Religion').length,grade===5?0:1);
+   assert.equal([...table.rows].filter(row=>row.querySelector('th')?.textContent==='Ethik').length,grade===5?0:1);
+   assert.equal(table.querySelectorAll('tr')[1].querySelector('select').value,'7');
+  }
+ } finally {dom.window.close();}
+});
 test('catalog failure is visible on the enrollment-only dashboard',async()=>{
  const {dom}=await setup(true,{enrollment:true,adminDashboard:true,singleEnrollmentRoot:true,response:{url:'/curriculum-enrollment-catalog',status:500,body:'server failure'}});
  try { assert.match(dom.window.document.querySelector('#admin-enrollment').textContent,/Anfrage fehlgeschlagen|erneut versuchen/); }
@@ -857,8 +888,8 @@ test('catalog failure is visible on the enrollment-only dashboard',async()=>{
 });
 test('teacher matrix renders active regular classes and grade-wide individual rows',async()=>{
  const {dom,root,requests}=await setup(true,{enrollment:true,adminDashboard:true,activeSubjectIdsByGrade:{5:[1,2,6,7],6:[1,4,5,6]},enrollmentSubjects:[
-  {id:1,name:'Deutsch',mode:'REGULAR',assignmentGroup:null,typeExplicit:1},
-  {id:2,name:'Musik',mode:'REGULAR',assignmentGroup:null,typeExplicit:1},
+  {id:1,name:'Deutsch',mode:'UNSPECIFIED',regularEligible:1,assignmentGroup:null,typeExplicit:0},
+  {id:2,name:'Musik',mode:'REGULAR',regularEligible:true,assignmentGroup:null,typeExplicit:1},
   {id:4,name:'WPF Französisch',mode:'INDIVIDUAL',assignmentGroup:'WPF',typeExplicit:1},
   {id:6,name:'Ethik01',mode:'INDIVIDUAL',assignmentGroup:'RELIGION_ETHIK',typeExplicit:1},
   {id:7,name:'Reli01',mode:'INDIVIDUAL',assignmentGroup:'RELIGION_ETHIK',typeExplicit:1}

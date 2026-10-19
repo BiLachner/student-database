@@ -404,6 +404,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         };
         const action=(parent,label,fn)=>{const b=el('button',label);b.type='button';parent.append(b);b.addEventListener('click',()=>run(async()=>{b.disabled=true;try{await fn();}finally{b.disabled=false;}}));return b;};
         const call=async(path,data,permission)=>{if(!await allowed(permission))throw Error(permissionDenied);return post(path,data);};
+        const isRegularSubject=subject=>subject!=null&&subject.mode!=='INDIVIDUAL'
+            &&(subject.regularEligible===true||subject.regularEligible===1);
         if(catalog.admin) {
             const matrix=el('section'); matrix.className='admin-teacher-matrix'; matrix.setAttribute('aria-labelledby','teacher-matrix-heading'); section.append(matrix);
             const matrixStatus=el('p'); matrixStatus.setAttribute('role','status'); matrixStatus.setAttribute('aria-live','polite'); matrix.append(el('h3','Lehrkräfte'),matrixStatus);
@@ -432,9 +434,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                     const id=Number(subject.id),active=activeIds.has(id), stale=regularAssignments.has(id)||individualAssignments.has(id);
                     if(subject.assignmentGroup==='WPF'&&Number(gradeSelect.value)!==6)return false;
                     if(!active&&!stale)return false;
-                    return subject.mode==='REGULAR' || (subject.mode==='INDIVIDUAL'&&['RELIGION_ETHIK','WPF'].includes(subject.assignmentGroup));
+                    return isRegularSubject(subject) || (subject.mode==='INDIVIDUAL'&&['RELIGION_ETHIK','WPF'].includes(subject.assignmentGroup));
                 }).sort((a,b)=>String(a.name).localeCompare(String(b.name),'de'));
-                const regular=visible.filter(subject=>subject.mode==='REGULAR');
+                const regular=visible.filter(isRegularSubject);
                 const individual=visible.filter(subject=>subject.mode==='INDIVIDUAL');
                 if(!visible.length){const empty=el('p','Für diesen Jahrgang sind keine global aktivierten Fächer vorhanden.');empty.dataset.teacherMatrixEmpty='true';matrix.append(empty);return;}
                 const table=document.createElement('table');table.dataset.teacherMatrixTable='true';table.className='admin-teacher-matrix-table';
@@ -457,7 +459,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     const wrapper=el('label');wrapper.className='teacher-matrix-control';wrapper.append(el('span',label));const select=el('select');select.setAttribute('aria-label',`${subject.name}, ${label}`);optionsFor(subject,existing).forEach(item=>{const option=el('option',item.label||item.name);option.value=String(item.id);select.append(option);});select.value=existing==null?'':String(existing);const state=el('small');state.className='teacher-matrix-save-status';state.setAttribute('aria-live','polite');wrapper.append(select,state);cell.append(wrapper);
                     let previous=select.value;select.addEventListener('change',()=>{const next=select.value;saveCell(select,previous,{path:payload.path,body:payload.body(next)},state,key).then(()=>{if(select.value===next)previous=next;});});
                 };
-                const appendRow=(subject)=>{const row=el('tr');const heading=el('th',subject.name);heading.scope='row';heading.className='teacher-matrix-subject';row.append(heading);if(subject.mode==='REGULAR'){
+                const appendRow=(subject)=>{const row=el('tr');const heading=el('th',subject.name);heading.scope='row';heading.className='teacher-matrix-subject';row.append(heading);if(isRegularSubject(subject)){
                     for(const schoolClass of classes){const cell=el('td');cell.dataset.label=schoolClass.label;const found=assignments.find(item=>Number(item.classId)===Number(schoolClass.id)&&Number(item.subjectId)===Number(subject.id));addSelect(cell,schoolClass.label,subject,found?.teacherId,{path:'/assign-class-subject-teacher',body:next=>({semesterId,classId:Number(schoolClass.id),subjectId:Number(subject.id),teacherId:next===''?null:Number(next)})},currentKey(semesterId,'class',schoolClass.id,subject.id));row.append(cell);}
                     const empty=el('td','—');empty.dataset.label='Jahrgang';row.append(empty);
                 } else {for(const schoolClass of classes){const empty=el('td','—');empty.dataset.label=schoolClass.label;row.append(empty);}const cell=el('td');cell.dataset.label='Jahrgang';const found=assignments.find(item=>item.classId==null&&Number(item.grade)===Number(gradeSelect.value)&&Number(item.subjectId)===Number(subject.id));addSelect(cell,`Jahrgang ${gradeSelect.value}`,subject,found?.teacherId,{path:'/assign-individual-grade-teacher',body:next=>({grade:Number(gradeSelect.value),semesterId,subjectId:Number(subject.id),teacherId:next===''?null:Number(next)})},currentKey(semesterId,'grade',gradeSelect.value,subject.id));row.append(cell);}
@@ -547,8 +549,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         confirmSelection.addEventListener('click',()=>{mappingArea.hidden=false;regularPicker.hidden=false;individualPanel.hidden=false;status.textContent='Auswahl bestätigt. Die Einrichtungsfunktionen sind eingeblendet.';if(typeof prepareTeachersButton?.click==='function')prepareTeachersButton.click();});
         revealSemesterSetup=()=>{selectorGate.hidden=false;section.querySelectorAll(':scope > details').forEach(node=>node.hidden=false);status.textContent='Halbjahr und Klassenstufe auswählen und bestätigen.';};
         const invalidate=()=>{mappingVersion++;proposal=null;mappingArea.replaceChildren(el('h3','REGULAR-Fächer und Lehrkraftmatrix'),prepareTeachersButton);};
-        const regularSubjects=()=>data.subjects.filter(s=>s.regularEligible===true
-            || (s.regularEligible == null && s.mode==='REGULAR'&&Number(s.typeExplicit)===1));
+        const regularSubjects=()=>data.subjects.filter(isRegularSubject);
         const regularPicker=el('fieldset');regularPicker.className='admin-regular-subject-picker';regularPicker.hidden=false;regularPicker.append(el('legend','REGULAR-Fächer dieses Jahrgangs'));landing.insertBefore(regularPicker,mappingArea);
         const renderRegularPicker=()=>{
             regularPicker.querySelectorAll(':scope > label,:scope > div').forEach(node=>node.remove());
