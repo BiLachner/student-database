@@ -64,6 +64,14 @@ test('teacher navigation uses the existing sticky shell styles for wrapped and d
   assert.match(style,/\.teacher-main-menu a\[aria-current="page"\]/);
 });
 
+test('teacher logout styling is scoped to the teacher navigation',()=>{
+  assert.match(style,/\.teacher-main-menu \.teacher-main-menu-logout-item\s*\{[^}]*margin-left:auto;/);
+  assert.match(style,/\.teacher-main-menu \.teacher-main-menu-logout-item button\s*\{[^}]*display:inline-flex;/s);
+  assert.match(style,/\.teacher-main-menu \.teacher-main-menu-logout-item button:hover,/);
+  assert.doesNotMatch(style,/body\s*>\s*header\s*\{\s*display:\s*flex/);
+  assert.doesNotMatch(style,/^\.logout-button\s*\{/m);
+});
+
 for (const [url,label] of [
   ['https://school.example.invalid/dashboard','Übersicht'],
   ['https://school.example.invalid/dashboard#overview','Übersicht'],

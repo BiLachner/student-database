@@ -667,9 +667,29 @@ main.attendance.teacher-dashboard #manual:focus { background:#17324d; }
 .teacher-main-menu a { display:block; min-width:0; padding:.62rem .72rem; color:#fff; font-weight:700; text-align:center; text-decoration:none; border-radius:.35rem; overflow-wrap:anywhere; }
 .teacher-main-menu a:hover, .teacher-main-menu a:focus, .teacher-main-menu a[aria-current="page"] { background:#2c668e; }
 .teacher-main-menu a:focus-visible, .teacher-quick-links a:focus-visible, .teacher-dashboard button:focus-visible, .teacher-dashboard select:focus-visible, .teacher-dashboard input:focus-visible { outline:3px solid #ffbf47; outline-offset:2px; }
-.teacher-main-menu-logout-item { margin-left:auto; }
+.teacher-main-menu .teacher-main-menu-logout-item { margin-left:auto; }
 .teacher-main-menu-logout-item form { margin:0; }
-.teacher-main-menu-logout-item button { display:block; padding:.62rem .72rem; border:0; color:#fff; background:#0f2338; font:inherit; font-weight:700; text-align:center; border-radius:.35rem; cursor:pointer; }
+.teacher-main-menu .teacher-main-menu-logout-item button {
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-height:2.55rem;
+  margin:0;
+  padding:.62rem .72rem;
+  border:1px solid #b8c7d6;
+  border-radius:.4rem;
+  color:#17324d;
+  background:#e9eef3;
+  font:inherit;
+  font-weight:700;
+  text-align:center;
+  cursor:pointer;
+}
+.teacher-main-menu .teacher-main-menu-logout-item button:hover,
+.teacher-main-menu .teacher-main-menu-logout-item button:focus {
+  color:#fff;
+  background:#2c668e;
+}
 .teacher-function-page { margin:1rem 0; padding:1rem 1.2rem; background:#fff; border:1px solid #d9e1ea; border-radius:.7rem; box-shadow:0 2px 8px #172b4d12; scroll-margin-top:5rem; }
 .teacher-function-page[hidden] { display:none; }
 .teacher-status-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(10.5rem, 1fr)); gap:.75rem; margin:1rem 0; }
@@ -815,7 +835,7 @@ main.attendance .attendance-class-picker-panel:empty::before { content:'Keine Kl
   .admin-main-menu-sections { display:grid; grid-template-columns:1fr 1fr; width:100%; }
   .admin-main-menu-account { align-items:stretch; justify-content:space-between; margin-left:0; }
   .teacher-main-menu-sections > ul, .teacher-main-menu > ul { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); }
-  .teacher-main-menu-logout-item { grid-column:1 / -1; margin-left:0; }
+  .teacher-main-menu .teacher-main-menu-logout-item { grid-column:1 / -1; margin-left:0; }
   .teacher-main-menu-logout-item button, .teacher-main-menu-logout-item form { width:100%; }
 .teacher-progress-layout { display:block; }
 .teacher-filter-bar { align-items:stretch; flex-direction:column; }
