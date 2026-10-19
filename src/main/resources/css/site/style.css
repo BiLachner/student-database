@@ -20,6 +20,43 @@ header {
   margin-bottom: 20px;
 }
 
+body > header {
+  display: flex;
+  justify-content: flex-end;
+}
+
+body > header form {
+  margin: 0 0 10px;
+}
+
+.logout-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .45rem;
+  margin: 0;
+  padding: .62rem .72rem;
+  border: 0;
+  border-radius: .35rem;
+  box-shadow: inset 0 0 0 1px #c5d0dc;
+  color: #17324d;
+  background: #e9eef3;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.logout-button:hover,
+.logout-button:focus {
+  background: #fff;
+}
+
+.logout-icon {
+  flex: none;
+  width: 1.1em;
+  height: 1.1em;
+}
+
 section {
   margin-bottom: 30px;
 }
@@ -343,9 +380,9 @@ table tr:last-child td {
 .teacher-main-menu a { display:block; min-width:0; padding:.62rem .72rem; color:#fff; font-weight:700; text-align:center; text-decoration:none; border-radius:.35rem; overflow-wrap:anywhere; }
 .teacher-main-menu a:hover, .teacher-main-menu a:focus, .teacher-main-menu a[aria-current="page"] { background:#2c668e; }
 .teacher-main-menu a:focus-visible, .teacher-quick-links a:focus-visible, .teacher-dashboard button:focus-visible, .teacher-dashboard select:focus-visible, .teacher-dashboard input:focus-visible { outline:3px solid #ffbf47; outline-offset:2px; }
-.teacher-main-menu-logout-item { margin-left:auto; }
+.teacher-main-menu .teacher-main-menu-logout-item { margin-left:auto; }
 .teacher-main-menu-logout-item form { margin:0; }
-.teacher-main-menu-logout-item button { display:block; padding:.62rem .72rem; border:0; color:#fff; background:#0f2338; font:inherit; font-weight:700; text-align:center; border-radius:.35rem; cursor:pointer; }
+.teacher-main-menu-logout-item .logout-button { display:flex; }
 .teacher-function-page { margin:1rem 0; padding:1rem 1.2rem; background:#fff; border:1px solid #d9e1ea; border-radius:.7rem; box-shadow:0 2px 8px #172b4d12; scroll-margin-top:5rem; }
 .teacher-function-page[hidden] { display:none; }
 .teacher-status-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(10.5rem, 1fr)); gap:.75rem; margin:1rem 0; }
@@ -460,7 +497,7 @@ table tr:last-child td {
   .admin-main-menu-sections { display:grid; grid-template-columns:1fr 1fr; width:100%; }
   .admin-main-menu-logout { align-self:stretch; margin-left:0; }
   .teacher-main-menu-sections > ul, .teacher-main-menu > ul { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); }
-  .teacher-main-menu-logout-item { grid-column:1 / -1; margin-left:0; }
+  .teacher-main-menu .teacher-main-menu-logout-item { grid-column:1 / -1; margin-left:0; }
   .teacher-main-menu-logout-item button, .teacher-main-menu-logout-item form { width:100%; }
   .teacher-progress-layout { grid-template-columns:1fr; }
   .teacher-filter-bar { align-items:stretch; flex-direction:column; }
