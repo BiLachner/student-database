@@ -6,7 +6,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     const overviewRoot = document.querySelector('#overview');
     const progressRoot = document.querySelector('#student-progress');
     const separatedAdmin = Boolean(adminEnrollmentRoot && adminCentralRoot);
-    const root = adminCentralRoot || document.querySelector('#curriculum');
+    // The admin dashboard mounts enrollment in #admin-enrollment and does not
+    // include the central curriculum mount on that page.
+    const root = adminCentralRoot || document.querySelector('#curriculum') || adminEnrollmentRoot;
     if (!root && !adminEnrollmentRoot) return;
     let revealSemesterSetup=()=>{};
     const el = (tag, text) => { const node = document.createElement(tag); if (text != null) node.textContent = text; return node; };

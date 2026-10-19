@@ -7,7 +7,7 @@ const script=fs.readFileSync(path.join(__dirname,'../../main/resources/js/site/c
 const tick=()=>new Promise(resolve=>setTimeout(resolve,20));
 async function setup(admin, options={}){
  const markup=options.adminDashboard
-  ? '<section id="schuljahr"><select data-global-semester></select><div id="admin-enrollment"></div></section><section id="curriculum-admin"><div id="admin-central-curriculum"></div></section>'
+  ? '<section id="schuljahr"><select data-global-semester></select><div id="admin-enrollment"></div></section>'+(options.singleEnrollmentRoot?'':'<section id="curriculum-admin"><div id="admin-central-curriculum"></div></section>')
   : (options.overview?'<section id="overview"></section>':'')+(admin?'<select data-global-semester></select>':'')+'<section id="curriculum"></section>'+(options.progress?'<section id="student-progress"></section>':'');
  const dom=new JSDOM(markup,{url:'https://school.example.invalid/',runScripts:'outside-only'});
  dom.window.scrollTo=()=>{};
@@ -842,6 +842,18 @@ test('admin curriculum mounts one combined teacher matrix without legacy teacher
   assert.equal(matrix.querySelectorAll('button').length,0);
   assert.equal(requests.some(r=>['/assign-grade-curriculum','/assign-individual-grade-teacher','/assign-curriculum-wpf'].includes(r.url)),false);
  } finally {dom.window.close();}
+});
+test('admin enrollment-only dashboard initializes its matrix mount',async()=>{
+ const {dom,requests}=await setup(true,{enrollment:true,adminDashboard:true,singleEnrollmentRoot:true});
+ try {
+  assert.ok(dom.window.document.querySelector('#admin-enrollment .admin-teacher-matrix'));
+  assert.equal(requests.filter(request=>request.url==='/curriculum-enrollment-catalog').length,1);
+ } finally {dom.window.close();}
+});
+test('catalog failure is visible on the enrollment-only dashboard',async()=>{
+ const {dom}=await setup(true,{enrollment:true,adminDashboard:true,singleEnrollmentRoot:true,response:{url:'/curriculum-enrollment-catalog',status:500,body:'server failure'}});
+ try { assert.match(dom.window.document.querySelector('#admin-enrollment').textContent,/Anfrage fehlgeschlagen|erneut versuchen/); }
+ finally {dom.window.close();}
 });
 test('teacher matrix renders active regular classes and grade-wide individual rows',async()=>{
  const {dom,root,requests}=await setup(true,{enrollment:true,adminDashboard:true,activeSubjectIdsByGrade:{5:[1,2,6,7],6:[1,4,5,6]},enrollmentSubjects:[
