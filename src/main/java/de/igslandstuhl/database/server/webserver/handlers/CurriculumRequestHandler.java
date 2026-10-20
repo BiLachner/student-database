@@ -17,7 +17,7 @@ public final class CurriculumRequestHandler {
         for(String path:List.of("/curriculum-catalog","/curriculum-structure","/curriculum-budget","/curriculum-progress",
                 "/flexible-tasks","/add-flexible-task","/edit-flexible-task","/complete-flexible-task",
                 "/flexible-curriculum-structure","/add-flexible-topic","/rename-flexible-topic","/curriculum-releases","/set-curriculum-release",
-                "/curriculum-teacher-roster","/my-tutor-classes"))
+                "/curriculum-teacher-roster","/my-tutor-classes","/curriculum-learning-group-sheet","/curriculum-nansteine","/add-nanstein","/assign-nanstein","/complete-nanstein"))
             HttpHandler.registerPostRequestHandler(path,AccessLevel.TEACHER,CurriculumRequestHandler::handle);
         for(String path:List.of("/rename-topic","/edit-task","/add-curriculum-topic","/add-curriculum-task",
                 "/central-curriculum-overview","/preview-central-curriculum-import","/import-central-curriculum",
@@ -289,6 +289,11 @@ public final class CurriculumRequestHandler {
                 }
                 case "/curriculum-students" -> result=service.students(actor,scope(rq,actor));
                 case "/curriculum-teacher-roster" -> {result=service.teacherRoster(actor,scope(rq,actor));includeNulls=true;}
+                case "/curriculum-learning-group-sheet" -> result=service.learningGroupSheet(actor,scope(rq,actor));
+                case "/curriculum-nansteine" -> result=service.nansteine(actor,scope(rq,actor));
+                case "/add-nanstein" -> result=service.createNanstein(actor,scope(rq,actor),name(rq),integer(rq,"tokens"));
+                case "/assign-nanstein" -> {service.assignNanstein(actor,integer(rq,"nansteinId"),integer(rq,"studentId"));result=Map.of("ok",true);}
+                case "/complete-nanstein" -> {service.completeNanstein(actor,integer(rq,"nansteinId"),integer(rq,"studentId"));result=Map.of("ok",true);}
                 case "/assign-curriculum-context" -> {service.assign(actor,integer(rq,"studentId"),scope(rq,actor));result=Map.of("ok",true);}
                 case "/curriculum-catalog" -> result=service.catalog(actor);
                 case "/curriculum-structure" -> result=service.centralStructure(actor,integer(rq,"subjectId"),integer(rq,"grade"),integer(rq,"semesterId"));

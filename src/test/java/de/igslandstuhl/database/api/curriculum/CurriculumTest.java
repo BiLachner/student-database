@@ -96,6 +96,29 @@ class CurriculumTest {
         assertEquals(2,Curriculum.noteForTokens(75));
         assertEquals(1,Curriculum.noteForTokens(90));
     }
+    @Test void classSubjectTeacherChangeSynchronizesExistingRegularContextAtomically() throws Exception {
+        db.writeTransaction(c->{exec(c,"INSERT OR IGNORE INTO curriculum_subject_types(subject,mode,assignment_group) VALUES(?, 'REGULAR', NULL)",id);exec(c,"INSERT INTO curriculum_class_teachers(semester,class,subject,teacher) VALUES(?,?,?,?)",id,id,id,id);return null;});
+        new CurriculumEnrollment(service).assignClassSubjectTeacher(admin,id,id,id,id+1);
+        assertEquals(id+1,scalar("SELECT teacher FROM curriculum_class_teachers WHERE semester=? AND class=? AND subject=?",id,id,id));
+        assertEquals(id+1,scalar("SELECT teacher FROM student_curriculum_contexts WHERE student=? AND subject=? AND semester=?",id,id,id));
+        assertEquals(1,service.teacherRoster(new Curriculum.Actor(false,id+1),new Curriculum.Scope(id+1,id,id,id)).size());
+        assertThrows(CurriculumException.class,()->service.teacherRoster(teacher,scope));
+    }
+    @Test void nansteinAssignmentAndCompletionAreIndividualAndCountOnce() throws Exception {
+        db.writeTransaction(c->{
+            exec(c,"INSERT OR IGNORE INTO curriculum_subject_types(subject,mode,assignment_group) VALUES(?, 'REGULAR', NULL)",id);
+            exec(c,"CREATE TABLE IF NOT EXISTS curriculum_nansteine(id INTEGER PRIMARY KEY,owner_teacher INTEGER,subject INTEGER,class INTEGER,semester INTEGER,grade INTEGER,course_group INTEGER,name TEXT,tokens INTEGER)");
+            exec(c,"CREATE TABLE IF NOT EXISTS curriculum_nanstein_assignments(nanstein INTEGER,student INTEGER,PRIMARY KEY(nanstein,student))");
+            exec(c,"CREATE TABLE IF NOT EXISTS curriculum_nanstein_completions(nanstein INTEGER,student INTEGER,teacher INTEGER,tokens INTEGER,PRIMARY KEY(nanstein,student))");
+            return null;
+        });
+        var extra=service.createNanstein(teacher,scope,"Individuelle Hilfe",7);
+        assertEquals(0,scalar("SELECT COUNT(*) FROM curriculum_nanstein_assignments"));
+        service.assignNanstein(teacher,extra.id(),id); service.completeNanstein(teacher,extra.id(),id);
+        var progress=service.progress(teacher,id,scope);
+        assertEquals(7L,progress.get("nansteinTokens")); assertEquals(7L,progress.get("totalTokens"));
+        assertThrows(CurriculumException.class,()->service.completeNanstein(teacher,extra.id(),id));
+    }
     @Test void tutorGraduationWritesCanonicalStudentValueAndHistoryUsedByOverview() throws Exception {
         db.writeTransaction(c->{
             exec(c,"UPDATE school_years SET current_semester=? WHERE id=?",id,id);
@@ -1483,7 +1506,9 @@ class CurriculumTest {
         var staff=jsonResponse(Teacher.get(id),"/curriculum-progress",assignmentBody());assertEquals(own,staff);
         var adminUser=Admin.create("details-admin-"+id,"synthetic-test-only");
         assertEquals(own,jsonResponse(adminUser,"/curriculum-progress",assignmentBody()));
-        assertEquals(Set.of("semesterId","centralTokens","flexibleTokens","totalTokens","completedCentralTasks","completedFlexibleTasks"),own.keySet());
+        Set<String> expectedKeys=new HashSet<>(Set.of("semesterId","centralTokens","flexibleTokens","totalTokens","completedCentralTasks","completedFlexibleTasks"));
+        if (own.has("nansteinTokens")) expectedKeys.addAll(Set.of("nansteinTokens","completedNansteine"));
+        assertEquals(expectedKeys,own.keySet());
         var central=own.getAsJsonArray("completedCentralTasks").get(0).getAsJsonObject();
         assertEquals(Set.of("id","name","tokens","niveau","stageNumber","topicId","topicName"),central.keySet());
         var detail=own.getAsJsonArray("completedFlexibleTasks").get(0).getAsJsonObject();

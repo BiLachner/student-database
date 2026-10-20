@@ -28,8 +28,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         const render = data => {
             output.replaceChildren();
             const heading = el('h4', `${data.classLabel || 'Klasse'} · ${data.semesterLabel || 'Halbjahr'}`); output.append(heading);
-            const wrap = el('div'); wrap.className = 'teacher-table-scroll'; const table = document.createElement('table');
-            const head = table.insertRow(); head.append(el('th','Schüler'));
+            const wrap = el('div'); wrap.className = 'teacher-table-scroll'; const table = document.createElement('table'); table.className='teacher-weekly-table';
+            const head = table.insertRow(); head.className='teacher-weekly-header'; head.append(el('th','Schüler'));
             for (const subject of (data.subjects || [])) head.append(el('th', subject.name));
             for (const student of (data.students || [])) {
                 const row = table.insertRow(); const nameCell=el('td'); nameCell.append(el('div',student.name || 'Schüler'));
@@ -44,7 +44,12 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const cells = new Map((student.subjects || []).map(cell => [cell.subjectId, cell]));
                 for (const subject of (data.subjects || [])) {
                     const cell = cells.get(subject.id) || {totalTokens:0,note:6,stages:[]};
-                    const td = row.insertCell(); td.append(el('div', `${cell.totalTokens ?? 0} 🪙 · Note ${cell.note ?? 6}`));
+                    const td = row.insertCell();
+                    if (cell.assigned === false || cell.totalTokens == null) td.append(el('div','—'));
+                    else {
+                        if (cell.actualSubjectName) td.append(el('small', `${cell.actualSubjectName}: `));
+                        td.append(el('div', `${cell.totalTokens} 🪙 · Note ${cell.note}`));
+                    }
                     const stages = (cell.stages || []).map(stage => stage.niveau ? `${stage.niveau} ✓` : `${stage.name || 'Etappe'} ✓`).join(' ');
                     if (stages) { const small = el('small', `Etappen: ${stages}`); td.append(small); }
                 }

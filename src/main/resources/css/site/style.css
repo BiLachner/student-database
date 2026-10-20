@@ -761,7 +761,30 @@ main.attendance .attendance-class-picker-panel:empty::before { content:'Keine Kl
   .teacher-weekly-conversations { border:0; margin:0; padding:0; }
   .teacher-table-scroll { overflow:visible; }
   .teacher-weekly-conversations table { width:100%; min-width:0; page-break-inside:auto; }
+    .teacher-weekly-conversations .teacher-weekly-table .teacher-weekly-header { display:table-header-group; }
+    .teacher-weekly-conversations .teacher-weekly-table th { position:static; }
   .teacher-weekly-conversations tr { page-break-inside:avoid; page-break-after:auto; }
+}
+
+.teacher-weekly-conversations .teacher-weekly-table .teacher-weekly-header th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--sandstone, #eee4d2);
+}
+.teacher-weekly-conversations .teacher-weekly-table th:first-child,
+.teacher-weekly-conversations .teacher-weekly-table td:first-child { min-width: 13rem; }
+
+.teacher-learning-sheet { display:none; }
+.teacher-learning-sheet-table { border-collapse:collapse; width:100%; }
+.teacher-learning-sheet-table th,.teacher-learning-sheet-table td { border:1px solid #555; padding:.35rem; vertical-align:top; }
+.teacher-learning-sheet-table td { min-width:5rem; height:2.2rem; }
+@media print {
+    @page { size:A4 landscape; margin:10mm; }
+    body:has(.printing-learning-sheet) > * { display:none !important; }
+    body:has(.printing-learning-sheet) .teacher-learning-sheet { display:block !important; }
+    .teacher-learning-sheet-table thead { display:table-header-group; }
+    .teacher-learning-sheet-table tr { page-break-inside:avoid; }
 }
 
 .curriculum-topic-card {

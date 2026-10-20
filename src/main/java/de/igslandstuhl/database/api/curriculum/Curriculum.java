@@ -48,6 +48,8 @@ public final class Curriculum {
         }
         Scope scope() { return new Scope(ownerTeacher, subjectId, classId, semesterId); }
     }
+    public record Nanstein(int id, int ownerTeacher, int subjectId, int classId, int semesterId,
+                           int grade, Integer courseGroupId, String name, int tokens) {}
     public enum ActiveStageType { CENTRAL, FLEXIBLE }
     /** UNASSESSED is an API operation only; it is never written to the assessment table. */
     public enum AssessmentStatus { UNASSESSED, PASSED, FAILED_ONCE, FAILED_TWICE, LOCKED }
@@ -612,6 +614,38 @@ public final class Curriculum {
     public Map<String,Object> flexibleStructure(Actor actor,Scope scope) throws SQLException {
         return transaction(c->{authorize(c,actor,scope,false);
             return Map.of("topics",flexibleTopics(c,scope),"tasks",plannedFlexibleTasks(c,scope));});
+    }
+    private static Nanstein nanstein(Map<String,Object> row) {
+        return new Nanstein(integer(row,"id"),integer(row,"owner_teacher"),integer(row,"subject"),integer(row,"class"),integer(row,"semester"),integer(row,"grade"),row.get("course_group")==null?null:integer(row,"course_group"),(String)row.get("name"),integer(row,"tokens"));
+    }
+    public List<Nanstein> nansteine(Actor actor, Scope scope) throws SQLException {
+        return transaction(c->{authorize(c,actor,scope,false); boolean individual=individualSubject(c,scope.subjectId());
+            List<Map<String,Object>> rows=individual
+                    ? rows(c,"SELECT * FROM curriculum_nansteine WHERE course_group=? ORDER BY id",resolveScope(c,scope).courseGroupId())
+                    : rows(c,"SELECT * FROM curriculum_nansteine WHERE owner_teacher=? AND subject=? AND class=? AND semester=? ORDER BY id",scope.teacherId(),scope.subjectId(),scope.classId(),scope.semesterId());
+            return rows.stream().map(Curriculum::nanstein).toList();});
+    }
+    public Nanstein createNanstein(Actor actor, Scope scope, String name, int tokenValue) throws SQLException {
+        String value=validName(name); if(tokenValue<1 || tokenValue>HARD_LIMIT) throw error(400,"invalid_input","Nanstein-Münzen müssen zwischen 1 und 105 liegen.");
+        return transaction(c->{int grade=authorize(c,actor,scope,true); Integer group=individualSubject(c,scope.subjectId())?resolveScope(c,scope).courseGroupId():null;
+            write(c,"INSERT INTO curriculum_nansteine(owner_teacher,subject,class,semester,grade,course_group,name,tokens) VALUES(?,?,?,?,?,?,?,?)",scope.teacherId(),scope.subjectId(),scope.classId(),scope.semesterId(),grade,group,value,tokenValue);
+            return nanstein(require(c,"SELECT * FROM curriculum_nansteine WHERE id=last_insert_rowid()"));});
+    }
+    public int assignNanstein(Actor actor,int nansteinId,int studentId) throws SQLException {
+        if(actor==null || actor.admin()) throw error(403,"forbidden","Eine Lehrkraft ist für die Nanstein-Zuweisung erforderlich.");
+        return transaction(c->{var n=nanstein(require(c,"SELECT * FROM curriculum_nansteine WHERE id=?",nansteinId));
+            Scope scope=new Scope(n.ownerTeacher(),n.subjectId(),n.classId(),n.semesterId(),n.courseGroupId()); authorize(c,actor,scope,false);
+            require(c,"SELECT id FROM students WHERE id=? AND COALESCE(active,1)=1",studentId);
+            if(number(c,"SELECT COUNT(*) FROM student_curriculum_contexts x WHERE x.student=? AND x.subject=? AND x.semester=? AND x.class=? AND "+(n.courseGroupId()==null?"1=1":"x.course_group=?"),n.courseGroupId()==null?new Object[]{studentId,n.subjectId(),n.semesterId(),n.classId()}:new Object[]{studentId,n.subjectId(),n.semesterId(),n.classId(),n.courseGroupId()})==0)
+                throw error(403,"forbidden","Der Schüler gehört nicht zu diesem autorisierten Unterrichtskontext.");
+            write(c,"INSERT INTO curriculum_nanstein_assignments(nanstein,student) VALUES(?,?) ON CONFLICT DO NOTHING",nansteinId,studentId); return number(c,"SELECT COUNT(*) FROM curriculum_nanstein_assignments WHERE nanstein=? AND student=?",nansteinId,studentId);}).intValue();
+    }
+    public void completeNanstein(Actor actor,int nansteinId,int studentId) throws SQLException {
+        if(actor==null || actor.admin()) throw error(403,"forbidden","Eine Lehrkraft ist für den Nanstein-Abschluss erforderlich.");
+        transaction(c->{var n=nanstein(require(c,"SELECT * FROM curriculum_nansteine WHERE id=?",nansteinId)); authorize(c,actor,new Scope(n.ownerTeacher(),n.subjectId(),n.classId(),n.semesterId(),n.courseGroupId()),false);
+            if(number(c,"SELECT COUNT(*) FROM curriculum_nanstein_assignments WHERE nanstein=? AND student=?",nansteinId,studentId)==0) throw error(409,"nanstein_not_assigned","Der Nanstein wurde diesem Schüler noch nicht zugewiesen.");
+            if(number(c,"SELECT COUNT(*) FROM curriculum_nanstein_completions WHERE nanstein=? AND student=?",nansteinId,studentId)>0) throw error(409,"nanstein_already_completed","Dieser Nanstein wurde bereits gutgeschrieben.");
+            write(c,"INSERT INTO curriculum_nanstein_completions(nanstein,student,teacher,tokens) VALUES(?,?,?,?)",nansteinId,studentId,actor.teacherId(),n.tokens()); return null;});
     }
     public int createFlexibleTopic(Actor actor,Scope scope,String name) throws SQLException {
         String value=validName(name);
@@ -1416,8 +1450,15 @@ public final class Curriculum {
         // Totals are derived from the exact returned identities in this transaction, never a second query/cache.
         long central=completedCentralTasks.stream().mapToLong(CompletedCentralTask::tokens).sum();
         long flexible=completedFlexibleTasks.stream().mapToLong(CompletedFlexibleTask::awardedTokens).sum();
-        return Map.of("semesterId",scope.semesterId(),"centralTokens",central,"flexibleTokens",flexible,"totalTokens",central+flexible,
-                "completedCentralTasks",completedCentralTasks,"completedFlexibleTasks",completedFlexibleTasks);
+        boolean nansteinSchema=number(c,"SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='curriculum_nanstein_completions'")>0;
+        List<Map<String,Object>> nansteine=List.of();
+        if (nansteinSchema)
+            nansteine=rows(c,"SELECT n.id,n.name,n.tokens FROM curriculum_nanstein_completions x JOIN curriculum_nansteine n ON n.id=x.nanstein WHERE x.student=? AND n.subject=? AND n.semester=? AND "+(individualSubject(c,scope.subjectId())?"n.course_group=?":"n.owner_teacher=? AND n.class=?"),
+                    individualSubject(c,scope.subjectId())?new Object[]{studentId,scope.subjectId(),scope.semesterId(),resolveScope(c,scope).courseGroupId()}:new Object[]{studentId,scope.subjectId(),scope.semesterId(),scope.teacherId(),scope.classId()});
+        long nanstein=nansteine.stream().mapToLong(row->integer(row,"tokens")).sum();
+        Map<String,Object> result=new LinkedHashMap<>(); result.put("semesterId",scope.semesterId()); result.put("centralTokens",central); result.put("flexibleTokens",flexible); result.put("totalTokens",central+flexible+nanstein); result.put("completedCentralTasks",completedCentralTasks); result.put("completedFlexibleTasks",completedFlexibleTasks);
+        if (nansteinSchema) { result.put("nansteinTokens",nanstein); result.put("completedNansteine",nansteine); }
+        return result;
     }
     /** Tutor-only read model built from the same completion and stage read models as normal progress. */
     public Map<String,Object> weeklyConversationOverview(Actor actor,int semester,int classId) throws SQLException {
@@ -1433,15 +1474,18 @@ public final class Curriculum {
             String semesterLabel=String.valueOf(require(c,"SELECT label FROM semesters WHERE id=?",semester).get("label"));
             int grade=integer(classRow,"grade");
             List<Map<String,Object>> subjects=rows(c,
-                    "SELECT DISTINCT s.id,s.name,ct.teacher AS teacherId FROM curriculum_grade_subjects gs "
-                    + "JOIN subjects s ON s.id=gs.subject JOIN curriculum_class_teachers ct ON ct.semester=gs.semester AND ct.class=? AND ct.subject=gs.subject "
-                    + "WHERE gs.semester=? AND gs.grade=? "
-                    + "UNION SELECT DISTINCT s.id,s.name,sc.teacher AS teacherId FROM student_curriculum_contexts sc JOIN subjects s ON s.id=sc.subject "
-                    + "WHERE sc.semester=? AND sc.class=? ORDER BY name",classId,semester,grade,semester,classId);
+                    "SELECT DISTINCT s.id,s.name,s.name AS subjectCode,t.mode,ct.teacher AS teacherId FROM curriculum_grade_subjects gs "
+                    + "JOIN subjects s ON s.id=gs.subject LEFT JOIN curriculum_subject_types t ON t.subject=s.id LEFT JOIN curriculum_class_teachers ct ON ct.semester=gs.semester AND ct.class=? AND ct.subject=gs.subject "
+                    + "WHERE gs.semester=? AND gs.grade=?",classId,semester,grade);
             List<Map<String,Object>> allowedSubjects=new ArrayList<>();
             for (var row : subjects)
-                if (!SolSubjectPolicy.isManagedGrade(grade) || SolSubjectPolicy.isAllowed(c,grade,integer(row,"id")))
+                if ((!SolSubjectPolicy.isManagedGrade(grade) || SolSubjectPolicy.isAllowed(c,grade,integer(row,"id")))
+                        && !"INDIVIDUAL".equals(String.valueOf(row.get("mode"))))
                     allowedSubjects.add(row);
+            allowedSubjects.sort((left,right)->Integer.compare(subjectOrder(String.valueOf(left.get("subjectCode"))),subjectOrder(String.valueOf(right.get("subjectCode")))));
+            if (number(c,"SELECT COUNT(*) FROM curriculum_individual_assignments ia JOIN curriculum_subject_types st ON st.subject=ia.subject AND st.assignment_group='WPF' JOIN students s ON s.id=ia.student WHERE ia.semester=? AND s.class=?",semester,classId)>0) {
+                Map<String,Object> wpf=new LinkedHashMap<>(); wpf.put("id",-1); wpf.put("name","WPF"); wpf.put("subjectCode","WPF"); wpf.put("teacherId",null); wpf.put("assignmentGroup","WPF"); allowedSubjects.add(wpf);
+            }
             subjects=allowedSubjects;
             List<Map<String,Object>> students=rows(c,"SELECT id,first_name AS firstName,last_name AS lastName FROM students WHERE class=? AND COALESCE(active,1)=1 ORDER BY last_name,first_name,id",classId);
             List<Map<String,Object>> output=new ArrayList<>();
@@ -1453,12 +1497,23 @@ public final class Curriculum {
                 row.put("graduationHistory",graduationHistory(c,studentId));
                 List<Map<String,Object>> cells=new ArrayList<>();
                 for (var subject:subjects) {
-                    int subjectId=integer(subject,"id"), teacherId=integer(subject,"teacherId");
-                    var context=rows(c,"SELECT teacher,class,grade FROM student_curriculum_contexts WHERE student=? AND subject=? AND semester=? AND class=?",studentId,subjectId,semester,classId);
-                    Map<String,Object> cell=new LinkedHashMap<>(); cell.put("subjectId",subjectId); cell.put("totalTokens",0L); cell.put("note",noteForTokens(0)); cell.put("stages",List.of());
+                    int listedSubjectId=integer(subject,"id");
+                    List<Map<String,Object>> context;
+                    if (listedSubjectId==-1) {
+                        context=rows(c,"SELECT x.subject,x.teacher,x.class,x.grade FROM curriculum_individual_assignments ia "
+                                +"JOIN curriculum_subject_types st ON st.subject=ia.subject AND st.assignment_group='WPF' "
+                                +"JOIN student_curriculum_contexts x ON x.student=ia.student AND x.subject=ia.subject AND x.semester=ia.semester AND x.class=? "
+                                +"WHERE ia.student=? AND ia.semester=? AND ia.assignment_group='WPF'",classId,studentId,semester);
+                    } else {
+                        context=rows(c,"SELECT subject,teacher,class,grade FROM student_curriculum_contexts WHERE student=? AND subject=? AND semester=? AND class=?",studentId,listedSubjectId,semester,classId);
+                    }
+                    Map<String,Object> cell=new LinkedHashMap<>(); cell.put("subjectId",listedSubjectId); cell.put("assigned",false); cell.put("totalTokens",null); cell.put("note",null); cell.put("stages",List.of());
                     if (!context.isEmpty()) {
+                        var assignedContext=context.get(0); int subjectId=integer(assignedContext,"subject"), teacherId=integer(assignedContext,"teacher");
                         Map<String,Object> totals=progress(c,studentId,new Scope(teacherId,subjectId,classId,semester));
                         long total=((Number)totals.get("totalTokens")).longValue(); cell.put("totalTokens",total); cell.put("note",noteForTokens(total));
+                        cell.put("assigned",true); cell.put("actualSubjectId",subjectId);
+                        if (listedSubjectId==-1) cell.put("actualSubjectName",require(c,"SELECT name FROM subjects WHERE id=?",subjectId).get("name"));
                         List<Map<String,Object>> stages=new ArrayList<>();
                         @SuppressWarnings("unchecked") List<CompletedCentralTask> central=(List<CompletedCentralTask>)totals.get("completedCentralTasks");
                         for (var stage:central) { Map<String,Object> done=new LinkedHashMap<>(); done.put("id",stage.id()); done.put("name",stage.name()); done.put("niveau",stage.niveau()); done.put("tokens",stage.tokens()); stages.add(done); }
@@ -1472,6 +1527,9 @@ public final class Curriculum {
             }
             Map<String,Object> out=new LinkedHashMap<>(); out.put("semesterId",semester); out.put("semesterLabel",semesterLabel); out.put("classId",classId); out.put("classLabel",classRow.get("label")); out.put("subjects",subjects); out.put("students",output); return out;
         });
+    }
+    private static int subjectOrder(String code) {
+        return switch (code) { case "DE","Deutsch" -> 1; case "EN","Englisch" -> 2; case "MATH","Mathematik" -> 3; case "GL","Gesellschaftslehre" -> 4; case "NAWI","Naturwissenschaften" -> 5; case "WPF" -> 6; default -> 50; };
     }
     private static String graduationLabel(int level) { return GraduationLevel.of(level).getGermanTranslation(); }
     private static List<Map<String,Object>> graduationHistory(Connection c,int studentId) throws SQLException {
@@ -1716,5 +1774,25 @@ public final class Curriculum {
             out.put("topics",rows(c,"SELECT id,name,number FROM topics WHERE subject=? AND grade=? AND semester=? ORDER BY number,id",subject,grade,semester));
             out.put("tasks",rows(c,"SELECT t.id,t.topic,t.stage_number AS stageNumber,t.name,t.tokens,t.niveau FROM tasks t JOIN topics p ON p.id=t.topic WHERE p.subject=? AND p.grade=? AND p.semester=? ORDER BY p.number,t.stage_number,t.id",subject,grade,semester));
             out.put("centralTokens",central(c,subject,grade,semester));out.put("regularLimit",REGULAR_LIMIT);out.put("hardLimit",HARD_LIMIT);return out;});
+    }
+    /** Printable, non-persistent read model for the currently authorized learning group. */
+    public Map<String,Object> learningGroupSheet(Actor actor, Scope scope) throws SQLException {
+        return transaction(c -> {
+            int grade=authorize(c,actor,scope,false);
+            var subject=require(c,"SELECT name FROM subjects WHERE id=?",scope.subjectId());
+            var semester=require(c,"SELECT label FROM semesters WHERE id=?",scope.semesterId());
+            var students=rows(c,"SELECT s.id,s.first_name AS firstName,s.last_name AS lastName FROM students s "
+                    +"JOIN student_curriculum_contexts x ON x.student=s.id AND x.subject=? AND x.semester=? AND x.class=? "
+                    +"WHERE COALESCE(s.active,1)=1 ORDER BY s.last_name,s.first_name,s.id",scope.subjectId(),scope.semesterId(),scope.classId());
+            List<Map<String,Object>> stages=new ArrayList<>();
+            for(var row:rows(c,"SELECT p.id AS topicId,p.name AS topicName,t.id,t.name,t.tokens,t.stage_number AS stageNumber,0 AS variableTokens "
+                    +"FROM topics p JOIN tasks t ON t.topic=p.id WHERE p.subject=? AND p.grade=? AND p.semester=? ORDER BY p.number,t.stage_number,t.id",scope.subjectId(),grade,scope.semesterId())) stages.add(new LinkedHashMap<>(row));
+            String flexibleSql=individualSubject(c,scope.subjectId())
+                    ? "SELECT p.id AS topicId,p.name AS topicName,t.id,t.name,t.tokens,0 AS stageNumber,t.variable_tokens AS variableTokens FROM flexible_tasks t LEFT JOIN flexible_task_topics m ON m.flexible_task=t.id LEFT JOIN flexible_topics p ON p.id=m.flexible_topic WHERE t.course_group=? ORDER BY p.id IS NULL,p.id,t.id"
+                    : "SELECT p.id AS topicId,p.name AS topicName,t.id,t.name,t.tokens,0 AS stageNumber,t.variable_tokens AS variableTokens FROM flexible_tasks t LEFT JOIN flexible_task_topics m ON m.flexible_task=t.id LEFT JOIN flexible_topics p ON p.id=m.flexible_topic AND p.owner_teacher=t.owner_teacher AND p.subject=t.subject AND p.class=t.class AND p.semester=t.semester AND p.grade=t.grade WHERE t.owner_teacher=? AND t.subject=? AND t.class=? AND t.semester=? ORDER BY p.id IS NULL,p.id,t.id";
+            Object[] args=individualSubject(c,scope.subjectId()) ? new Object[]{resolveScope(c,scope).courseGroupId()} : new Object[]{scope.teacherId(),scope.subjectId(),scope.classId(),scope.semesterId()};
+            for(var row:rows(c,flexibleSql,args)) stages.add(new LinkedHashMap<>(row));
+            Map<String,Object> out=new LinkedHashMap<>(); out.put("classId",scope.classId()); out.put("subjectId",scope.subjectId()); out.put("subjectName",subject.get("name")); out.put("semesterId",scope.semesterId()); out.put("semesterLabel",semester.get("label")); out.put("date",LocalDate.now(ZoneId.of("Europe/Berlin")).toString()); out.put("students",students); out.put("stages",stages); return out;
+        });
     }
 }

@@ -141,6 +141,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         const contextLabel = el('label', 'Unterrichtskontext '); contextLabel.append(contextSelect); panel.append(contextLabel);
         const reload = el('button', 'Aktualisieren'); reload.type = 'button'; panel.append(reload);
+        const printSheet=el('button','Übersichtsblatt drucken'); printSheet.type='button'; panel.append(printSheet);
+        const printOutput=el('section'); printOutput.className='teacher-learning-sheet'; printOutput.hidden=true; progressRoot.append(printOutput);
         let generation = 0, detailGeneration = 0, selectedStudentId = null, lastDetailTrigger = null;
         function selectedContext() {
             return activeContexts[Number(contextSelect.value)] || null;
@@ -212,7 +214,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (control) control.focus();
             }
         }
-        function renderDetail(detail, canAssess) {
+        function renderDetail(detail, canAssess, nansteine = []) {
             dialogTitle.textContent = detail.studentName || 'Schülerdetails';
             detailArea.replaceChildren();
             const detailStatus = el('p'); detailStatus.setAttribute('role','status');
@@ -303,6 +305,14 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
             const tableWrap = el('div'); tableWrap.className = 'teacher-table-scroll'; tableWrap.append(table);
             detailArea.append(tableWrap);
+            if (nansteine.length) {
+                const extra=el('section'); extra.className='teacher-nansteine'; extra.append(el('h4','Individuelle Zusatzaufgaben (Nansteine)'));
+                for (const item of nansteine) { const row=el('p',`${item.name} · ${item.tokens} Münzen `); const assign=el('button','Zuweisen');assign.type='button';const complete=el('button','Abschließen');complete.type='button';
+                    assign.addEventListener('click',async()=>{try{await post('/assign-nanstein',{nansteinId:item.id,studentId:detail.studentId});detailStatus.textContent='Nanstein zugewiesen.';}catch(error){detailStatus.textContent=error.message;}});
+                    complete.addEventListener('click',async()=>{try{await post('/complete-nanstein',{nansteinId:item.id,studentId:detail.studentId});detailStatus.textContent='Nanstein abgeschlossen und gutgeschrieben.';await loadDetail(detail.studentId);}catch(error){detailStatus.textContent=error.message;}});
+                    row.append(assign,complete);extra.append(row);
+                } detailArea.append(extra);
+            }
         }
         async function loadDetail(studentId) {
             const context = selectedContext();
@@ -324,7 +334,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (current !== detailGeneration || snapshot !== latest) return;
                 const canAssess=await allowed('curriculum_assess_students');
                 if(current!==detailGeneration)return;
-                renderDetail(detail,canAssess);
+                let nansteine=[];
+                try { nansteine=await post('/curriculum-nansteine',{subjectId:context.subjectId,classId:context.classId,semesterId:context.semesterId,teacherId:catalog.teacherId}); } catch (_) { /* optional feature on pre-migration DEV fixtures */ }
+                if(current!==detailGeneration)return;
+                renderDetail(detail,canAssess,nansteine);
             } catch (error) {
                 if (current !== detailGeneration) return;
                 detailArea.replaceChildren(el('p', error.message));
@@ -381,6 +394,21 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         contextSelect.addEventListener('change', () => { resetDetail(); loadRoster(); });
         reload.addEventListener('click', loadRoster);
+        printSheet.addEventListener('click', async () => {
+            const context=selectedContext(); if(!context){status.textContent='Für dieses Fach ist kein autorisierter Unterrichtskontext ausgewählt.';return;}
+            printSheet.disabled=true; status.textContent='Druckübersicht wird geladen.';
+            try {
+                const data=await post('/curriculum-learning-group-sheet',{subjectId:context.subjectId,classId:context.classId,semesterId:context.semesterId,teacherId:catalog.teacherId});
+                printOutput.replaceChildren();
+                printOutput.append(el('h2','Lerngruppenblatt'),el('p',`${data.classLabel||context.classLabel||'Lerngruppe'} · ${data.subjectName||context.subjectName||'Fach'} · ${data.semesterLabel||'Halbjahr'} · ${data.date||''}`));
+                const table=document.createElement('table'); table.className='teacher-learning-sheet-table'; const thead=document.createElement('thead');
+                const header=thead.insertRow(); header.append(el('th','Schüler')); for(const stage of (data.stages||[])){const tokens=stage.variableTokens===true?`bis zu ${stage.tokens}`:stage.tokens;header.append(el('th',`${stage.name||'Etappe'} – ${tokens} Münzen`));} thead.append(header); table.append(thead);
+                const body=document.createElement('tbody'); for(const student of (data.students||[])){const row=body.insertRow();row.append(el('th',`${student.firstName||''} ${student.lastName||''}`.trim()));for(const _ of (data.stages||[])){const cell=row.insertCell();cell.append(document.createElement('span'));}} table.append(body); printOutput.append(table); printOutput.hidden=false;
+                const finish=()=>{printOutput.hidden=true;progressRoot.classList.remove('printing-learning-sheet');window.removeEventListener('afterprint',finish);}; progressRoot.classList.add('printing-learning-sheet'); window.addEventListener('afterprint',finish); window.print();
+                status.textContent='Druckübersicht bereit.';
+            } catch(error){status.textContent=`Druckübersicht konnte nicht geladen werden: ${error.message}`;status.style.color='darkred';}
+            finally{printSheet.disabled=false;}
+        });
         await loadRoster();
     }
     function field(form, label, value, type = 'text') {
@@ -856,6 +884,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                     if (variable.checked && Number(tokens.value) < 1) throw Error('Eine variable Etappe benötigt mindestens 1 Münze.');
                     await save('/add-flexible-task',{...scope,name:name.value,tokens:Number(tokens.value),variableTokens:variable.checked,topicId:topic.value?Number(topic.value):null});
                 }catch(error){showError(error);}});
+                const nansteinSection=el('section'); nansteinSection.className='teacher-nanstein-editor'; nansteinSection.append(el('h4','Nansteine – individuelle Zusatzaufgaben'));
+                const nansteinForm=el('form'), nansteinName=field(nansteinForm,'Name der Zusatzaufgabe',''), nansteinTokens=field(nansteinForm,'Münzwert',1,'number'); button(nansteinForm,'Nanstein anlegen'); nansteinSection.append(nansteinForm);
+                const nansteinList=el('ul'); nansteinSection.append(nansteinList); central.append(nansteinSection);
+                const loadNansteine=async()=>{nansteinList.replaceChildren();try{const items=await post('/curriculum-nansteine',scope);for(const item of items)nansteinList.append(el('li',`${item.name} · ${item.tokens} Münzen`));}catch(error){nansteinList.append(el('li',`Nansteine konnten nicht geladen werden: ${error.message}`));}};
+                nansteinForm.addEventListener('submit',async e=>{e.preventDefault();try{await post('/add-nanstein',{...scope,name:nansteinName.value,tokens:Number(nansteinTokens.value)});nansteinName.value='';await loadNansteine();}catch(error){showError(error);}}); await loadNansteine();
                 return;
             }
             for (const topic of structure.topics) {

@@ -132,12 +132,41 @@ public final class CurriculumEnrollment {
                 throw error(400,"invalid_input","Nur REGULAR-Fächer können klassenweise zugeordnet werden.");
             SolSubjectPolicy.requireAllowed(c,grade,subject);
             if(teacher!=null) require(c,"SELECT id FROM teachers WHERE id=?",teacher);
+            int archived=columnExists(c,"semesters","archived") ? integer(require(c,"SELECT archived FROM semesters WHERE id=?",semester),"archived") : 0;
+            if (archived != 0)
+                throw error(409,"archived_semester","Historische Halbjahre können nicht umgeschrieben werden.");
+            var existing = rows(c,"SELECT teacher FROM curriculum_class_teachers WHERE semester=? AND class=? AND subject=?",semester,classId,subject);
+            Integer oldTeacher = existing.isEmpty() || existing.get(0).get("teacher") == null ? null : integer(existing.get(0),"teacher");
+            if (Objects.equals(oldTeacher,teacher)) {
+                Map<String,Object> result=new LinkedHashMap<>();
+                result.put("semesterId",semester); result.put("classId",classId); result.put("subjectId",subject);
+                result.put("teacherId",teacher); result.put("updatedContexts",0); return result;
+            }
+            if (teacher == null && number(c,"SELECT COUNT(*) FROM student_curriculum_contexts WHERE semester=? AND class=? AND subject=?",semester,classId,subject)>0)
+                throw error(409,"context_conflict","Vorhandene Schülerkontexte benötigen eine gültige Ziel-Lehrkraft.");
+            if (teacher != null) {
+                var contexts=rows(c,"SELECT x.student,x.grade FROM student_curriculum_contexts x JOIN students s ON s.id=x.student "
+                        +"WHERE x.semester=? AND x.class=? AND x.subject=?",semester,classId,subject);
+                for (var context:contexts) {
+                    int studentId=integer(context,"student"), contextGrade=integer(context,"grade");
+                    if (contextGrade != grade)
+                        throw error(409,"context_conflict","Ein Schülerkontext hat einen widersprüchlichen Jahrgang.");
+                    Curriculum.Scope target=new Curriculum.Scope(teacher,subject,classId,semester);
+                    Curriculum.compatibleCompletions(c,studentId,target,grade);
+                    long activeFlexible=number(c,"SELECT COUNT(*) FROM student_active_curriculum_stages a JOIN flexible_tasks t ON t.id=a.flexible_task "
+                            +"WHERE a.student=? AND a.subject=? AND a.semester=? AND (t.owner_teacher<>? OR t.class<>? OR t.grade<>?)",
+                            studentId,subject,semester,teacher,classId,grade);
+                    if (activeFlexible>0)
+                        throw error(409,"context_conflict","Ein aktiver flexibler Lernfortschritt gehört zu einem anderen Lehrkraftkontext.");
+                }
+            }
             // The global activation is the source of visible rows. Keep the
             // semester context operational without introducing a second UI step.
             write(c,"INSERT INTO curriculum_grade_subjects(grade,semester,subject) VALUES(?,?,?) ON CONFLICT DO NOTHING",grade,semester,subject);
             if(teacher==null) write(c,"DELETE FROM curriculum_class_teachers WHERE semester=? AND class=? AND subject=?",semester,classId,subject);
             else write(c,"INSERT INTO curriculum_class_teachers(semester,class,subject,teacher) VALUES(?,?,?,?) ON CONFLICT(semester,class,subject) DO UPDATE SET teacher=excluded.teacher",semester,classId,subject,teacher);
-            Map<String,Object> result=new LinkedHashMap<>();result.put("semesterId",semester);result.put("classId",classId);result.put("subjectId",subject);result.put("teacherId",teacher);return result;
+            int updated=teacher==null?0:write(c,"UPDATE student_curriculum_contexts SET teacher=? WHERE semester=? AND class=? AND subject=?",teacher,semester,classId,subject);
+            Map<String,Object> result=new LinkedHashMap<>();result.put("semesterId",semester);result.put("classId",classId);result.put("subjectId",subject);result.put("teacherId",teacher);result.put("updatedContexts",updated);return result;
         });
     }
 

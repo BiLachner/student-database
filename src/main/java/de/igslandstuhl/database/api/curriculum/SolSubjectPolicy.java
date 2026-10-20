@@ -88,11 +88,12 @@ final class SolSubjectPolicy {
     }
 
     static boolean isRegularAssignmentAllowed(Connection c, int subject) throws SQLException {
+        boolean hasCode=Curriculum.number(c,"SELECT COUNT(*) FROM pragma_table_info('subjects') WHERE name='subject_code'")>0;
         var row = Curriculum.require(c,
-                "SELECT s.subject_code,t.mode,t.assignment_group FROM subjects s LEFT JOIN curriculum_subject_types t ON t.subject=s.id WHERE s.id=?", subject);
+                "SELECT s.name,"+(hasCode?"s.subject_code":"NULL")+" AS subject_code,t.mode,t.assignment_group FROM subjects s LEFT JOIN curriculum_subject_types t ON t.subject=s.id WHERE s.id=?", subject);
         String code = row.get("subject_code") == null ? null : String.valueOf(row.get("subject_code"));
         String mode = row.get("mode") == null ? null : String.valueOf(row.get("mode")).strip().toUpperCase(Locale.ROOT);
-        return "REGULAR".equals(mode) || (mode == null && code != null && CORE_CODES.contains(code));
+        return "REGULAR".equals(mode) || (mode == null && ((code != null && CORE_CODES.contains(code)) || Set.of("Deutsch","Englisch","Mathematik","Naturwissenschaften","Gesellschaftslehre").contains(String.valueOf(row.get("name")))));
     }
 
     static List<Integer> activeSubjectIds(Connection c, int grade) throws SQLException {
