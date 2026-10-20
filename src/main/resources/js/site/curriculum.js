@@ -307,9 +307,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             detailArea.append(tableWrap);
             if (nansteine.length) {
                 const extra=el('section'); extra.className='teacher-nansteine'; extra.append(el('h4','Individuelle Zusatzaufgaben (Nansteine)'));
-                for (const item of nansteine) { const row=el('p',`${item.name} · ${item.tokens} Münzen `); const assign=el('button','Zuweisen');assign.type='button';const complete=el('button','Abschließen');complete.type='button';
-                    assign.addEventListener('click',async()=>{try{await post('/assign-nanstein',{nansteinId:item.id,studentId:detail.studentId});detailStatus.textContent='Nanstein zugewiesen.';}catch(error){detailStatus.textContent=error.message;}});
-                    complete.addEventListener('click',async()=>{try{await post('/complete-nanstein',{nansteinId:item.id,studentId:detail.studentId});detailStatus.textContent='Nanstein abgeschlossen und gutgeschrieben.';await loadDetail(detail.studentId);}catch(error){detailStatus.textContent=error.message;}});
+                for (const item of nansteine) { const row=el('div'); row.className='teacher-nanstein-row'; row.append(el('span',`${item.name} · ${item.tokens} Münzen`)); const state=el('strong',item.completed?'Erledigt und gutgeschrieben':item.assigned?'Zugewiesen und noch offen':'Nicht zugewiesen'); state.className='teacher-nanstein-state'; row.append(state); const assign=el('button',item.assigned?'Zugewiesen':'Zuweisen');assign.type='button';assign.disabled=item.assigned;
+                    const complete=el('button','Als erledigt bestätigen');complete.type='button';complete.disabled=!item.assigned||item.completed;
+                    assign.addEventListener('click',async()=>{assign.disabled=true;try{await post('/assign-nanstein',{nansteinId:item.id,studentId:detail.studentId});detailStatus.textContent=`Nanstein „${item.name}“ wurde ${detail.studentName||'dem Schüler'} zugewiesen; Münzen werden erst nach der Erledigungsbestätigung gutgeschrieben.`;await loadDetail(detail.studentId);}catch(error){assign.disabled=false;detailStatus.textContent=error.message;}});
+                    complete.addEventListener('click',async()=>{if(!window.confirm(`Die Leistung „${item.name}“ für ${detail.studentName||'diesen Schüler'} als erledigt bestätigen und ${item.tokens} Münzen gutschreiben?`))return;complete.disabled=true;try{await post('/complete-nanstein',{nansteinId:item.id,studentId:detail.studentId});detailStatus.textContent='Nanstein als erledigt bestätigt und gutgeschrieben.';await loadDetail(detail.studentId);}catch(error){complete.disabled=false;detailStatus.textContent=error.message;}});
                     row.append(assign,complete);extra.append(row);
                 } detailArea.append(extra);
             }
@@ -335,7 +336,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const canAssess=await allowed('curriculum_assess_students');
                 if(current!==detailGeneration)return;
                 let nansteine=[];
-                try { nansteine=await post('/curriculum-nansteine',{subjectId:context.subjectId,classId:context.classId,semesterId:context.semesterId,teacherId:catalog.teacherId}); } catch (_) { /* optional feature on pre-migration DEV fixtures */ }
+                try { nansteine=await post('/curriculum-nansteine',{subjectId:context.subjectId,classId:context.classId,semesterId:context.semesterId,teacherId:catalog.teacherId,studentId}); } catch (_) { /* optional feature on pre-migration DEV fixtures */ }
                 if(current!==detailGeneration)return;
                 renderDetail(detail,canAssess,nansteine);
             } catch (error) {

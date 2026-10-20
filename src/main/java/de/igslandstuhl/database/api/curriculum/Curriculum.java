@@ -629,6 +629,15 @@ public final class Curriculum {
                     : rows(c,"SELECT * FROM curriculum_nansteine WHERE owner_teacher=? AND subject=? AND class=? AND semester=? ORDER BY id",scope.teacherId(),scope.subjectId(),scope.classId(),scope.semesterId());
             return rows.stream().map(Curriculum::nanstein).toList();});
     }
+    /** Nanstein metadata enriched with the selected student's persisted state for teacher detail views. */
+    public List<Map<String,Object>> nansteinStatus(Actor actor, Scope scope, int studentId) throws SQLException {
+        return transaction(c->{authorize(c,actor,scope,false); boolean individual=individualSubject(c,scope.subjectId());
+            List<Map<String,Object>> rows=individual
+                    ? rows(c,"SELECT n.*, EXISTS(SELECT 1 FROM curriculum_nanstein_assignments a WHERE a.nanstein=n.id AND a.student=?) AS assigned, EXISTS(SELECT 1 FROM curriculum_nanstein_completions x WHERE x.nanstein=n.id AND x.student=?) AS completed FROM curriculum_nansteine n WHERE n.course_group=? ORDER BY n.id",studentId,studentId,resolveScope(c,scope).courseGroupId())
+                    : rows(c,"SELECT n.*, EXISTS(SELECT 1 FROM curriculum_nanstein_assignments a WHERE a.nanstein=n.id AND a.student=?) AS assigned, EXISTS(SELECT 1 FROM curriculum_nanstein_completions x WHERE x.nanstein=n.id AND x.student=?) AS completed FROM curriculum_nansteine n WHERE n.owner_teacher=? AND n.subject=? AND n.class=? AND n.semester=? ORDER BY n.id",studentId,studentId,scope.teacherId(),scope.subjectId(),scope.classId(),scope.semesterId());
+            for (var row: rows) { row.put("assigned", integer(row,"assigned") == 1); row.put("completed", integer(row,"completed") == 1); }
+            return rows;});
+    }
     public Nanstein createNanstein(Actor actor, Scope scope, String name, int tokenValue) throws SQLException {
         String value=validName(name); if(tokenValue<1 || tokenValue>HARD_LIMIT) throw error(400,"invalid_input","Nanstein-Münzen müssen zwischen 1 und 105 liegen.");
         return transaction(c->{int grade=authorize(c,actor,scope,true); Integer group=individualSubject(c,scope.subjectId())?resolveScope(c,scope).courseGroupId():null;

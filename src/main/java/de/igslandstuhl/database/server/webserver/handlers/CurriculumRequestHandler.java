@@ -290,7 +290,9 @@ public final class CurriculumRequestHandler {
                 case "/curriculum-students" -> result=service.students(actor,scope(rq,actor));
                 case "/curriculum-teacher-roster" -> {result=service.teacherRoster(actor,scope(rq,actor));includeNulls=true;}
                 case "/curriculum-learning-group-sheet" -> result=service.learningGroupSheet(actor,scope(rq,actor));
-                case "/curriculum-nansteine" -> result=service.nansteine(actor,scope(rq,actor));
+                case "/curriculum-nansteine" -> result=rq.containsKey("studentId")
+                        ? service.nansteinStatus(actor,scope(rq,actor),integer(rq,"studentId"))
+                        : service.nansteine(actor,scope(rq,actor));
                 case "/add-nanstein" -> result=service.createNanstein(actor,scope(rq,actor),name(rq),integer(rq,"tokens"));
                 case "/assign-nanstein" -> {service.assignNanstein(actor,integer(rq,"nansteinId"),integer(rq,"studentId"));result=Map.of("ok",true);}
                 case "/complete-nanstein" -> {service.completeNanstein(actor,integer(rq,"nansteinId"),integer(rq,"studentId"));result=Map.of("ok",true);}

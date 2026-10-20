@@ -114,7 +114,14 @@ class CurriculumTest {
         });
         var extra=service.createNanstein(teacher,scope,"Individuelle Hilfe",7);
         assertEquals(0,scalar("SELECT COUNT(*) FROM curriculum_nanstein_assignments"));
-        service.assignNanstein(teacher,extra.id(),id); service.completeNanstein(teacher,extra.id(),id);
+        var initialStatus=service.nansteinStatus(teacher,scope,id).get(0);
+        assertEquals(false,initialStatus.get("assigned")); assertEquals(false,initialStatus.get("completed"));
+        service.assignNanstein(teacher,extra.id(),id);
+        var assignedStatus=service.nansteinStatus(teacher,scope,id).get(0);
+        assertEquals(true,assignedStatus.get("assigned")); assertEquals(false,assignedStatus.get("completed"));
+        service.completeNanstein(teacher,extra.id(),id);
+        var completedStatus=service.nansteinStatus(teacher,scope,id).get(0);
+        assertEquals(true,completedStatus.get("assigned")); assertEquals(true,completedStatus.get("completed"));
         var progress=service.progress(teacher,id,scope);
         assertEquals(7L,progress.get("nansteinTokens")); assertEquals(7L,progress.get("totalTokens"));
         assertThrows(CurriculumException.class,()->service.completeNanstein(teacher,extra.id(),id));
