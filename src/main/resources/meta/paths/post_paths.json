@@ -418,6 +418,36 @@
         "namespaces": [],
         "access_level": "teacher"
     },
+    "/curriculum-learning-group-sheet": {
+        "type": "POST",
+        "handler_type": "PostRequestHandler",
+        "namespaces": [],
+        "access_level": "teacher"
+    },
+    "/curriculum-nansteine": {
+        "type": "POST",
+        "handler_type": "PostRequestHandler",
+        "namespaces": [],
+        "access_level": "teacher"
+    },
+    "/add-nanstein": {
+        "type": "POST",
+        "handler_type": "PostRequestHandler",
+        "namespaces": [],
+        "access_level": "teacher"
+    },
+    "/assign-nanstein": {
+        "type": "POST",
+        "handler_type": "PostRequestHandler",
+        "namespaces": [],
+        "access_level": "teacher"
+    },
+    "/complete-nanstein": {
+        "type": "POST",
+        "handler_type": "PostRequestHandler",
+        "namespaces": [],
+        "access_level": "teacher"
+    },
     "/my-curriculum-progress": {
         "type": "POST",
         "handler_type": "PostRequestHandler",

@@ -26,6 +26,7 @@ import java.security.SecureRandom;
 import java.sql.Connection;
 import java.time.LocalDate;
 import java.util.EnumSet;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
@@ -77,6 +78,14 @@ public final class FixtureRunner {
         instance.set(null, app);
         Server server = Server.getInstance();
         server.getConnection().createTables();
+        // The legacy 027 migration intentionally guards against a schema
+        // without the five canonical subjects. A fresh isolated fixture has
+        // no legacy seed rows, so provide only these synthetic baseline rows
+        // before exercising the real upgrade path.
+        server.getConnection().executeVoidProcessSecure(
+                "INSERT OR IGNORE INTO subjects (name) VALUES "
+                        + "('Deutsch'),('Englisch'),('Mathematik'),"
+                        + "('Gesellschaftslehre'),('Naturwissenschaften')");
         server.getConnection().migrateTables();
         System.out.println("A4b fixture: isolated schema ready");
 
@@ -114,6 +123,16 @@ public final class FixtureRunner {
                 studentAPassword, classA, GraduationLevel.initialValue());
         Student studentB = Student.registerStudentWithPassword(studentBId, "A4b", "Schüler B", studentBEmail,
                 studentBPassword, classD, GraduationLevel.initialValue());
+        List<Student> regularClassStudents = new ArrayList<>();
+        regularClassStudents.add(studentA);
+        for (int index = 3; index <= 29; index++) {
+            int id = studentAId + index;
+            String firstName = index == 3 ? "SehrLangerSynthetischerVorname" : "SynthSchueler" + index;
+            String lastName = index == 3 ? "MustermannMitEinemBesondersLangenNachnamen" : "Klasse6a" + index;
+            regularClassStudents.add(Student.registerStudentWithPassword(id, "A4b", firstName + " " + lastName,
+                    "a4b-student-" + index + "-" + suffix + "@example.invalid", password(), classA,
+                    GraduationLevel.initialValue()));
+        }
         System.out.println("A4b fixture: student accounts ready");
 
         LocalDate today = LocalDate.now();
@@ -128,20 +147,34 @@ public final class FixtureRunner {
 
         Curriculum.Actor actor = Curriculum.Actor.from(admin);
         CurriculumEnrollment enrollment = new CurriculumEnrollment(Curriculum.current());
-        int regularSubject = enrollment.addSubjectWithType(actor, "A4b REGULAR " + suffix, "REGULAR", null);
+        // Jahrgang 6 accepts only the canonical SOL regular subjects. Reuse
+        // the synthetic schema's canonical Deutsch row for the regular path.
+        int regularSubject = Subject.get("Deutsch").getId();
         int wpfSubject = enrollment.addSubjectWithType(actor, "A4b WPF " + suffix, "INDIVIDUAL", "WPF");
         int religionSubject = enrollment.addSubjectWithType(actor, "A4b Religion/Ethik " + suffix,
                 "INDIVIDUAL", "RELIGION_ETHIK");
         int alternativeWpfSubject = enrollment.addSubjectWithType(actor, "A4b WPF Alternative " + suffix,
                 "INDIVIDUAL", "WPF");
-        enrollment.assignGrade(actor, 6, semester.getId(), List.of(regularSubject), List.of(
-                new CurriculumEnrollment.Teaching(classA.getId(), regularSubject, teacherA.getId()),
-                new CurriculumEnrollment.Teaching(classD.getId(), regularSubject, teacherA.getId())));
+        server.getConnection().executeVoidProcessSecure(
+                "INSERT INTO subject_grade_activation(subject,grade) VALUES "
+                        + "(" + wpfSubject + ",6),(" + religionSubject + ",6),("
+                        + alternativeWpfSubject + ",6)");
+        List<Integer> regularSubjects = List.of(regularSubject,
+                Subject.get("Englisch").getId(), Subject.get("Mathematik").getId(),
+                Subject.get("Gesellschaftslehre").getId(), Subject.get("Naturwissenschaften").getId());
+        List<CurriculumEnrollment.Teaching> regularTeaching = new ArrayList<>();
+        for (int subject : regularSubjects) {
+            regularTeaching.add(new CurriculumEnrollment.Teaching(classA.getId(), subject, teacherA.getId()));
+            regularTeaching.add(new CurriculumEnrollment.Teaching(classD.getId(), subject, teacherA.getId()));
+        }
+        enrollment.assignGrade(actor, 6, semester.getId(), regularSubjects, regularTeaching);
         enrollment.assignIndividualTeacher(actor, 6, semester.getId(), wpfSubject, teacherA.getId());
         enrollment.assignIndividualTeacher(actor, 6, semester.getId(), religionSubject, teacherA.getId());
         enrollment.assignIndividualTeacher(actor, 6, semester.getId(), alternativeWpfSubject, teacherA.getId());
         enrollment.assignIndividual(actor, studentA.getId(), wpfSubject, classA.getId(), semester.getId(), "WPF", null);
         enrollment.assignIndividual(actor, studentB.getId(), wpfSubject, classD.getId(), semester.getId(), "WPF", null);
+        enrollment.assignIndividual(actor, regularClassStudents.get(1).getId(), alternativeWpfSubject,
+                classA.getId(), semester.getId(), "WPF", null);
         enrollment.assignIndividual(actor, studentA.getId(), religionSubject, classA.getId(), semester.getId(), "RELIGION_ETHIK", null);
         enrollment.assignIndividual(actor, studentB.getId(), religionSubject, classD.getId(), semester.getId(), "RELIGION_ETHIK", null);
         System.out.println("A4b fixture: curriculum and CourseGroups ready");
@@ -150,6 +183,15 @@ public final class FixtureRunner {
         Topic historyTopic = Topic.addTopic("A4b history " + suffix, Subject.get(wpfSubject), 6, 1, semester);
         Task historyTask = Task.addTask(historyTopic, "A4b completed history " + suffix, TaskLevel.LEVEL1, 1);
         studentA.changeTaskStatus(historyTask, Task.STATUS_COMPLETED);
+        Topic regularTopic = Topic.addTopic("Sehr lange synthetische Etappe für Druckprüfung " + suffix,
+                Subject.get(regularSubject), 6, 1, semester);
+        Task regularTask = Task.addTask(regularTopic, "Sehr lange synthetische Lernfortschritts-Etappe für A4-Druckprüfung " + suffix,
+                TaskLevel.LEVEL1, 2);
+        studentA.changeTaskStatus(regularTask, Task.STATUS_COMPLETED);
+        for (int stage = 2; stage <= 12; stage++) {
+            Task.addTask(regularTopic, "Synthetische Druck-Etappe " + stage + " mit ausreichender Spaltenbreite " + suffix,
+                    TaskLevel.LEVEL1, stage);
+        }
         System.out.println("A4b fixture: synthetic learning history ready");
 
         JsonObject root = new JsonObject();
