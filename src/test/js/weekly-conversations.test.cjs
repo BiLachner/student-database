@@ -40,6 +40,25 @@ test('tutor view offers only assigned classes and a printable compact table',asy
   assert.ok(instance.window.document.querySelector('.teacher-weekly-conversations').textContent.includes('Test Schüler'));
   assert.ok(instance.window.document.querySelector('.teacher-weekly-conversations').textContent.includes('Note 2'));
   assert.equal(instance.window.document.querySelectorAll('.teacher-filter-bar button').length,2);
-  assert.equal(instance.window.document.querySelectorAll('.teacher-weekly-conversations table tr:nth-child(2) button').length,3);
+  assert.equal(instance.window.document.querySelectorAll('.teacher-weekly-conversations tbody tr:first-child button').length,3);
+  instance.window.close();
+});
+
+test('tutor view renders offered WPF subjects as separate grouped columns',async()=>{
+  const instance=dom({
+    classes:[{semesterId:4,classId:7,label:'7a',grade:7}],
+    overview:{semesterLabel:'2026/27 HJ1',classLabel:'7a',subjects:[
+      {id:3,name:'Mathe'},
+      {id:21,name:'WPF Technik',assignmentGroup:'WPF'},
+      {id:22,name:'WPF Soziales',assignmentGroup:'WPF'}
+    ],students:[{name:'Belegt',subjects:[{subjectId:21,assigned:true,totalTokens:0,note:6,stages:[]}]} ,
+      {name:'Nicht belegt',subjects:[]} ]}
+  });
+  await new Promise(resolve=>setTimeout(resolve,30));
+  const table=instance.window.document.querySelector('.teacher-weekly-table');
+  assert.equal(table.querySelector('.teacher-weekly-groups th[colspan="2"]').textContent,'WPF');
+  assert.deepEqual([...table.querySelectorAll('.teacher-weekly-header th')].map(th=>th.textContent),['WPF Technik','WPF Soziales']);
+  assert.match(table.querySelector('tbody tr').textContent,/0 🪙 · Note 6/);
+  assert.match(table.querySelectorAll('tbody tr')[1].textContent,/—/);
   instance.window.close();
 });

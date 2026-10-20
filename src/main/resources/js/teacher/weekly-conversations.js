@@ -29,10 +29,25 @@ document.addEventListener('DOMContentLoaded', async () => {
             output.replaceChildren();
             const heading = el('h4', `${data.classLabel || 'Klasse'} · ${data.semesterLabel || 'Halbjahr'}`); output.append(heading);
             const wrap = el('div'); wrap.className = 'teacher-table-scroll'; const table = document.createElement('table'); table.className='teacher-weekly-table';
-            const head = table.insertRow(); head.className='teacher-weekly-header'; head.append(el('th','Schüler'));
-            for (const subject of (data.subjects || [])) head.append(el('th', subject.name));
+            const subjects = data.subjects || [];
+            const wpfSubjects = subjects.filter(subject => subject.assignmentGroup === 'WPF');
+            const regularSubjects = subjects.filter(subject => subject.assignmentGroup !== 'WPF');
+            const thead = document.createElement('thead');
+            if (wpfSubjects.length) {
+                const groups = thead.insertRow(); groups.className = 'teacher-weekly-groups';
+                const studentGroup = el('th','Schüler'); studentGroup.rowSpan = 2; groups.append(studentGroup);
+                for (const subject of regularSubjects) { const th = el('th', subject.name); th.rowSpan = 2; groups.append(th); }
+                const wpfGroup = el('th','WPF'); wpfGroup.colSpan = wpfSubjects.length; wpfGroup.scope = 'colgroup'; groups.append(wpfGroup);
+                const head = thead.insertRow(); head.className = 'teacher-weekly-header';
+                for (const subject of wpfSubjects) { const th = el('th', subject.name); th.scope = 'col'; head.append(th); }
+            } else {
+                const head = thead.insertRow(); head.className = 'teacher-weekly-header'; head.append(el('th','Schüler'));
+                for (const subject of regularSubjects) head.append(el('th', subject.name));
+            }
+            table.append(thead);
+            const body = document.createElement('tbody');
             for (const student of (data.students || [])) {
-                const row = table.insertRow(); const nameCell=el('td'); nameCell.append(el('div',student.name || 'Schüler'));
+                const row = body.insertRow(); const nameCell=el('td'); nameCell.append(el('div',student.name || 'Schüler'));
                 const graduation=el('div',`Graduierung: ${student.graduationLabel || '—'}`); graduation.className='teacher-graduation'; nameCell.append(graduation);
                 const select=document.createElement('select'); for(const [value,label] of [[0,'Neustarter'],[1,'Starter'],[2,'Durchstarter']]) { const option=el('option',label); option.value=value; option.selected=Number(student.graduationLevel)===value; select.append(option); }
                 const edit=el('button','ändern'); edit.type='button'; const save=el('button','Speichern'); save.type='button'; save.hidden=true; select.hidden=true;
@@ -42,7 +57,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const history=el('button','Verlauf anzeigen'); history.type='button'; const historyOutput=el('div'); historyOutput.hidden=true; history.addEventListener('click',()=>{historyOutput.hidden=!historyOutput.hidden; historyOutput.replaceChildren(...(student.graduationHistory||[]).map(item=>el('small',`${item.changedAt}: ${item.oldLabel} → ${item.newLabel} (${item.teacherName})`)));});
                 nameCell.append(select,edit,save,history,historyOutput); row.append(nameCell);
                 const cells = new Map((student.subjects || []).map(cell => [cell.subjectId, cell]));
-                for (const subject of (data.subjects || [])) {
+                for (const subject of subjects) {
                     const cell = cells.get(subject.id) || {totalTokens:0,note:6,stages:[]};
                     const td = row.insertCell();
                     if (cell.assigned === false || cell.totalTokens == null) td.append(el('div','—'));
@@ -54,7 +69,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     if (stages) { const small = el('small', `Etappen: ${stages}`); td.append(small); }
                 }
             }
-            wrap.append(table); output.append(wrap);
+            table.append(body); wrap.append(table); output.append(wrap);
         };
         const refresh = async () => {
             const [semesterId,classId] = select.value.split(':').map(Number); load.disabled = true; status.textContent = 'Wird geladen.';

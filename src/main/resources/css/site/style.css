@@ -768,8 +768,14 @@ main.attendance .attendance-class-picker-panel:empty::before { content:'Keine Kl
 
 .teacher-weekly-conversations .teacher-weekly-table .teacher-weekly-header th {
     position: sticky;
-    top: 0;
+    top: 2.25rem;
     z-index: 2;
+    background: var(--sandstone, #eee4d2);
+}
+.teacher-weekly-conversations .teacher-weekly-table .teacher-weekly-groups th {
+    position: sticky;
+    top: 0;
+    z-index: 3;
     background: var(--sandstone, #eee4d2);
 }
 .teacher-weekly-conversations .teacher-weekly-table th:first-child,

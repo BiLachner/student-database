@@ -181,8 +181,12 @@ public final class Curriculum {
                     + "+ COALESCE((SELECT SUM(COALESCE(x.awarded_tokens,t.tokens)) FROM completed_flexible_tasks x JOIN flexible_tasks t ON t.id=x.flexible_task "
                     + "WHERE x.student=s.id AND t.semester=? AND EXISTS (SELECT 1 FROM student_curriculum_contexts ctx "
                     + "WHERE ctx.student=s.id AND ctx.subject=t.subject AND ctx.semester=t.semester "
-                    + "AND (ctx.course_group=t.course_group OR (t.course_group IS NULL AND ctx.class=t.class)))),0) AS totalCoins "
-                    + "FROM students s JOIN classes cl ON cl.id=s.class WHERE COALESCE(s.active,1)=1 AND s.class<>0 AND cl.grade=?", semester, semester, grade);
+                    + "AND (ctx.course_group=t.course_group OR (t.course_group IS NULL AND ctx.class=t.class)))),0) "
+                    + "+ COALESCE((SELECT SUM(n.tokens) FROM curriculum_nanstein_completions x JOIN curriculum_nansteine n ON n.id=x.nanstein "
+                    + "WHERE x.student=s.id AND n.semester=? AND EXISTS (SELECT 1 FROM student_curriculum_contexts ctx "
+                    + "WHERE ctx.student=s.id AND ctx.subject=n.subject AND ctx.semester=n.semester "
+                    + "AND ((n.course_group IS NOT NULL AND ctx.course_group=n.course_group) OR (n.course_group IS NULL AND ctx.class=n.class)))),0) AS totalCoins "
+                    + "FROM students s JOIN classes cl ON cl.id=s.class WHERE COALESCE(s.active,1)=1 AND s.class<>0 AND cl.grade=?", semester, semester, semester, grade);
             Map<Integer,Long> totalsByStudent = new HashMap<>();
             for (Map<String,Object> row : rows) totalsByStudent.put(integer(row,"id"), ((Number) row.get("totalCoins")).longValue());
             long ownTotal = totalsByStudent.getOrDefault(studentId, 0L);
@@ -1474,7 +1478,7 @@ public final class Curriculum {
             String semesterLabel=String.valueOf(require(c,"SELECT label FROM semesters WHERE id=?",semester).get("label"));
             int grade=integer(classRow,"grade");
             List<Map<String,Object>> subjects=rows(c,
-                    "SELECT DISTINCT s.id,s.name,s.name AS subjectCode,t.mode,ct.teacher AS teacherId FROM curriculum_grade_subjects gs "
+                    "SELECT DISTINCT s.id,s.name,s.name AS subjectCode,t.mode,t.assignment_group AS assignmentGroup,ct.teacher AS teacherId FROM curriculum_grade_subjects gs "
                     + "JOIN subjects s ON s.id=gs.subject LEFT JOIN curriculum_subject_types t ON t.subject=s.id LEFT JOIN curriculum_class_teachers ct ON ct.semester=gs.semester AND ct.class=? AND ct.subject=gs.subject "
                     + "WHERE gs.semester=? AND gs.grade=?",classId,semester,grade);
             List<Map<String,Object>> allowedSubjects=new ArrayList<>();
@@ -1483,9 +1487,15 @@ public final class Curriculum {
                         && !"INDIVIDUAL".equals(String.valueOf(row.get("mode"))))
                     allowedSubjects.add(row);
             allowedSubjects.sort((left,right)->Integer.compare(subjectOrder(String.valueOf(left.get("subjectCode"))),subjectOrder(String.valueOf(right.get("subjectCode")))));
-            if (number(c,"SELECT COUNT(*) FROM curriculum_individual_assignments ia JOIN curriculum_subject_types st ON st.subject=ia.subject AND st.assignment_group='WPF' JOIN students s ON s.id=ia.student WHERE ia.semester=? AND s.class=?",semester,classId)>0) {
-                Map<String,Object> wpf=new LinkedHashMap<>(); wpf.put("id",-1); wpf.put("name","WPF"); wpf.put("subjectCode","WPF"); wpf.put("teacherId",null); wpf.put("assignmentGroup","WPF"); allowedSubjects.add(wpf);
-            }
+            // WPF is a visual group header. The actual columns are the active,
+            // canonically typed WPF subjects offered for this grade/semester.
+            List<Map<String,Object>> offeredWpf=rows(c,
+                    "SELECT DISTINCT s.id,s.name,s.name AS subjectCode,t.mode,t.assignment_group AS assignmentGroup,NULL AS teacherId "
+                    + "FROM course_groups cg JOIN subjects s ON s.id=cg.subject "
+                    + "JOIN curriculum_subject_types t ON t.subject=s.id "
+                    + "WHERE cg.semester=? AND cg.grade=? AND cg.active=1 AND cg.assignment_group='WPF' "
+                    + "AND t.mode='INDIVIDUAL' AND t.assignment_group='WPF' ORDER BY s.name COLLATE NOCASE",semester,grade);
+            allowedSubjects.addAll(offeredWpf);
             subjects=allowedSubjects;
             List<Map<String,Object>> students=rows(c,"SELECT id,first_name AS firstName,last_name AS lastName FROM students WHERE class=? AND COALESCE(active,1)=1 ORDER BY last_name,first_name,id",classId);
             List<Map<String,Object>> output=new ArrayList<>();
@@ -1499,11 +1509,10 @@ public final class Curriculum {
                 for (var subject:subjects) {
                     int listedSubjectId=integer(subject,"id");
                     List<Map<String,Object>> context;
-                    if (listedSubjectId==-1) {
+                    if ("WPF".equals(subject.get("assignmentGroup"))) {
                         context=rows(c,"SELECT x.subject,x.teacher,x.class,x.grade FROM curriculum_individual_assignments ia "
-                                +"JOIN curriculum_subject_types st ON st.subject=ia.subject AND st.assignment_group='WPF' "
                                 +"JOIN student_curriculum_contexts x ON x.student=ia.student AND x.subject=ia.subject AND x.semester=ia.semester AND x.class=? "
-                                +"WHERE ia.student=? AND ia.semester=? AND ia.assignment_group='WPF'",classId,studentId,semester);
+                                +"WHERE ia.student=? AND ia.semester=? AND ia.assignment_group='WPF' AND ia.subject=?",classId,studentId,semester,listedSubjectId);
                     } else {
                         context=rows(c,"SELECT subject,teacher,class,grade FROM student_curriculum_contexts WHERE student=? AND subject=? AND semester=? AND class=?",studentId,listedSubjectId,semester,classId);
                     }
@@ -1513,7 +1522,6 @@ public final class Curriculum {
                         Map<String,Object> totals=progress(c,studentId,new Scope(teacherId,subjectId,classId,semester));
                         long total=((Number)totals.get("totalTokens")).longValue(); cell.put("totalTokens",total); cell.put("note",noteForTokens(total));
                         cell.put("assigned",true); cell.put("actualSubjectId",subjectId);
-                        if (listedSubjectId==-1) cell.put("actualSubjectName",require(c,"SELECT name FROM subjects WHERE id=?",subjectId).get("name"));
                         List<Map<String,Object>> stages=new ArrayList<>();
                         @SuppressWarnings("unchecked") List<CompletedCentralTask> central=(List<CompletedCentralTask>)totals.get("completedCentralTasks");
                         for (var stage:central) { Map<String,Object> done=new LinkedHashMap<>(); done.put("id",stage.id()); done.put("name",stage.name()); done.put("niveau",stage.niveau()); done.put("tokens",stage.tokens()); stages.add(done); }
