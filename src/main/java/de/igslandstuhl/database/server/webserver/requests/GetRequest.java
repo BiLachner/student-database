@@ -101,6 +101,10 @@ public class GetRequest implements HttpRequest {
     public String getPath() {
         return path;
     }
+
+    public String getArgument(String name) {
+        return args.get(name);
+    }
     @Override
     public String getContext() {
         return context;

@@ -74,7 +74,6 @@ public class GetRequestHandler {
 
     public final void registerHandlers() {
         LOGGER.info("Registering Get Request Handlers...");
-        if (Registry.getRequestHandlerRegistry().stream().count() > 0) return; // already registered
         List<WebPath.PathInfo> getPaths = Registry.webPathRegistry().keyStream().filter((p) -> p.type().equals(RequestType.GET)).toList();
         for (WebPath.PathInfo pathInfo : getPaths) {
             WebPath webPath = Registry.webPathRegistry().get(pathInfo);
