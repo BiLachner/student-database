@@ -28,13 +28,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         const render = data => {
             output.replaceChildren();
             const heading = el('h4', `${data.classLabel || 'Klasse'} · ${data.semesterLabel || 'Halbjahr'}`); output.append(heading);
-            const wrap = el('div'); wrap.className = 'teacher-table-scroll'; const table = document.createElement('table'); table.className='teacher-weekly-table';
+            const wrap = el('div'); wrap.className = 'teacher-table-scroll teacher-weekly-scroll'; const table = document.createElement('table'); table.className='teacher-weekly-table';
             const subjects = data.subjects || [];
             const wpfSubjects = subjects.filter(subject => subject.assignmentGroup === 'WPF');
             const regularSubjects = subjects.filter(subject => subject.assignmentGroup !== 'WPF');
             const thead = document.createElement('thead');
+            let groups = null;
             if (wpfSubjects.length) {
-                const groups = thead.insertRow(); groups.className = 'teacher-weekly-groups';
+                groups = thead.insertRow(); groups.className = 'teacher-weekly-groups';
                 const studentGroup = el('th','Schüler'); studentGroup.rowSpan = 2; groups.append(studentGroup);
                 for (const subject of regularSubjects) { const th = el('th', subject.name); th.rowSpan = 2; groups.append(th); }
                 const wpfGroup = el('th','WPF'); wpfGroup.colSpan = wpfSubjects.length; wpfGroup.scope = 'colgroup'; groups.append(wpfGroup);
@@ -70,6 +71,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
             }
             table.append(body); wrap.append(table); output.append(wrap);
+            const pinHeader = () => { thead.style.transform = `translateY(${wrap.scrollTop}px)`; };
+            wrap.addEventListener('scroll', pinHeader, {passive:true});
+            pinHeader();
         };
         const refresh = async () => {
             const [semesterId,classId] = select.value.split(':').map(Number); load.disabled = true; status.textContent = 'Wird geladen.';
