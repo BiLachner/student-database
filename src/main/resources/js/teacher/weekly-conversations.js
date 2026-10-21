@@ -30,20 +30,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             const heading = el('h4', `${data.classLabel || 'Klasse'} · ${data.semesterLabel || 'Halbjahr'}`); output.append(heading);
             const wrap = el('div'); wrap.className = 'teacher-table-scroll teacher-weekly-scroll'; const table = document.createElement('table'); table.className='teacher-weekly-table';
             const subjects = data.subjects || [];
-            const wpfSubjects = subjects.filter(subject => subject.assignmentGroup === 'WPF');
-            const regularSubjects = subjects.filter(subject => subject.assignmentGroup !== 'WPF');
             const thead = document.createElement('thead');
-            let groups = null;
-            if (wpfSubjects.length) {
-                groups = thead.insertRow(); groups.className = 'teacher-weekly-groups';
-                const studentGroup = el('th','Schüler'); studentGroup.rowSpan = 2; groups.append(studentGroup);
-                for (const subject of regularSubjects) { const th = el('th', subject.name); th.rowSpan = 2; groups.append(th); }
-                const wpfGroup = el('th','WPF'); wpfGroup.colSpan = wpfSubjects.length; wpfGroup.scope = 'colgroup'; groups.append(wpfGroup);
-                const head = thead.insertRow(); head.className = 'teacher-weekly-header';
-                for (const subject of wpfSubjects) { const th = el('th', subject.name); th.scope = 'col'; head.append(th); }
-            } else {
-                const head = thead.insertRow(); head.className = 'teacher-weekly-header'; head.append(el('th','Schüler'));
-                for (const subject of regularSubjects) head.append(el('th', subject.name));
+            const head = thead.insertRow(); head.className = 'teacher-weekly-header';
+            head.append(el('th','Schüler'));
+            for (const subject of subjects) {
+                const th = el('th', subject.name); th.scope = 'col'; head.append(th);
             }
             table.append(thead);
             const body = document.createElement('tbody');
@@ -63,17 +54,13 @@ document.addEventListener('DOMContentLoaded', async () => {
                     const td = row.insertCell();
                     if (cell.assigned === false || cell.totalTokens == null) td.append(el('div','—'));
                     else {
-                        if (cell.actualSubjectName) td.append(el('small', `${cell.actualSubjectName}: `));
-                        td.append(el('div', `${cell.totalTokens} 🪙 · Note ${cell.note}`));
+                        td.append(el('div', `${cell.totalTokens} 🪙`));
+                        const gn = cell.lastGnDate ? formatGnDate(cell.lastGnDate) : 'noch kein GN';
+                        td.append(el('small', `letztes GN: ${gn}`));
                     }
-                    const stages = (cell.stages || []).map(stage => stage.niveau ? `${stage.niveau} ✓` : `${stage.name || 'Etappe'} ✓`).join(' ');
-                    if (stages) { const small = el('small', `Etappen: ${stages}`); td.append(small); }
                 }
             }
             table.append(body); wrap.append(table); output.append(wrap);
-            const pinHeader = () => { thead.style.transform = `translateY(${wrap.scrollTop}px)`; };
-            wrap.addEventListener('scroll', pinHeader, {passive:true});
-            pinHeader();
         };
         const refresh = async () => {
             const [semesterId,classId] = select.value.split(':').map(Number); load.disabled = true; status.textContent = 'Wird geladen.';
@@ -84,3 +71,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         load.addEventListener('click', refresh); await refresh();
     } catch (error) { if (error?.status === 403) mount.append(el('p', 'Die Tutor-Funktion ist für dieses Konto nicht freigeschaltet.')); else if (error?.status) mount.append(el('p', 'Tutor-Klassen konnten nicht geladen werden.')); }
 });
+
+function formatGnDate(value) {
+    const text = String(value || '').slice(0, 10);
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+    return match ? `${match[3]}.${match[2]}.${match[1]}` : text || 'unbekannt';
+}

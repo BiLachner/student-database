@@ -33,18 +33,18 @@ test('non-tutor receives no visible weekly-conversation control',async()=>{
 test('tutor view offers only assigned classes and a printable compact table',async()=>{
   const instance=dom({
     classes:[{semesterId:4,classId:7,label:'7a',grade:7},{semesterId:4,classId:8,label:'8b',grade:8}],
-    overview:{semesterLabel:'2026/27 HJ1',classLabel:'7a',subjects:[{id:3,name:'Mathe'}],students:[{name:'Test Schüler',subjects:[{subjectId:3,totalTokens:75,note:2,stages:[{niveau:2}]}]}]}
+    overview:{semesterLabel:'2026/27 HJ1',classLabel:'7a',subjects:[{id:3,name:'Mathe'}],students:[{name:'Test Schüler',subjects:[{subjectId:3,totalTokens:75,note:2,lastGnDate:'2026-10-20',stages:[{niveau:2}]}]}]}
   });
   await new Promise(resolve=>setTimeout(resolve,30));
   assert.equal(instance.window.document.querySelectorAll('.teacher-filter-bar option').length,2);
   assert.ok(instance.window.document.querySelector('.teacher-weekly-conversations').textContent.includes('Test Schüler'));
-  assert.ok(instance.window.document.querySelector('.teacher-weekly-conversations').textContent.includes('Note 2'));
+  assert.ok(instance.window.document.querySelector('.teacher-weekly-conversations').textContent.includes('letztes GN: 20.10.2026'));
   assert.equal(instance.window.document.querySelectorAll('.teacher-filter-bar button').length,2);
   assert.equal(instance.window.document.querySelectorAll('.teacher-weekly-conversations tbody tr:first-child button').length,3);
   instance.window.close();
 });
 
-test('tutor view renders offered WPF subjects as separate grouped columns',async()=>{
+test('tutor view renders offered WPF subjects as separate compact columns',async()=>{
   const instance=dom({
     classes:[{semesterId:4,classId:7,label:'7a',grade:7}],
     overview:{semesterLabel:'2026/27 HJ1',classLabel:'7a',subjects:[
@@ -56,9 +56,10 @@ test('tutor view renders offered WPF subjects as separate grouped columns',async
   });
   await new Promise(resolve=>setTimeout(resolve,30));
   const table=instance.window.document.querySelector('.teacher-weekly-table');
-  assert.equal(table.querySelector('.teacher-weekly-groups th[colspan="2"]').textContent,'WPF');
-  assert.deepEqual([...table.querySelectorAll('.teacher-weekly-header th')].map(th=>th.textContent),['WPF Technik','WPF Soziales']);
-  assert.match(table.querySelector('tbody tr').textContent,/0 🪙 · Note 6/);
+  assert.equal(table.querySelector('.teacher-weekly-groups'),null);
+  assert.deepEqual([...table.querySelectorAll('.teacher-weekly-header th')].map(th=>th.textContent),['Schüler','Mathe','WPF Technik','WPF Soziales']);
+  assert.match(table.querySelector('tbody tr').textContent,/0 🪙/);
+  assert.match(table.querySelector('tbody tr').textContent,/noch kein GN/);
   assert.match(table.querySelectorAll('tbody tr')[1].textContent,/—/);
   instance.window.close();
 });

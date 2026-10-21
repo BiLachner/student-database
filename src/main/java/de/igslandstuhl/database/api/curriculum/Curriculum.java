@@ -1531,6 +1531,7 @@ public final class Curriculum {
                         Map<String,Object> totals=progress(c,studentId,new Scope(teacherId,subjectId,classId,semester));
                         long total=((Number)totals.get("totalTokens")).longValue(); cell.put("totalTokens",total); cell.put("note",noteForTokens(total));
                         cell.put("assigned",true); cell.put("actualSubjectId",subjectId);
+                        cell.put("lastGnDate", lastGnDate(c, studentId, new Scope(teacherId, subjectId, classId, semester)));
                         List<Map<String,Object>> stages=new ArrayList<>();
                         @SuppressWarnings("unchecked") List<CompletedCentralTask> central=(List<CompletedCentralTask>)totals.get("completedCentralTasks");
                         for (var stage:central) { Map<String,Object> done=new LinkedHashMap<>(); done.put("id",stage.id()); done.put("name",stage.name()); done.put("niveau",stage.niveau()); done.put("tokens",stage.tokens()); stages.add(done); }
@@ -1544,6 +1545,37 @@ public final class Curriculum {
             }
             Map<String,Object> out=new LinkedHashMap<>(); out.put("semesterId",semester); out.put("semesterLabel",semesterLabel); out.put("classId",classId); out.put("classLabel",classRow.get("label")); out.put("subjects",subjects); out.put("students",output); return out;
         });
+    }
+    /** The latest confirmed Gelingensnachweis, excluding Nanstein completions. */
+    private static String lastGnDate(Connection c, int studentId, Scope scope) throws SQLException {
+        int grade = resolveScope(c, scope).grade();
+        String central = scalarString(c,
+                "SELECT MAX(x.last_updated) FROM taskstats x JOIN tasks t ON t.id=x.task JOIN topics p ON p.id=t.topic "
+                        + "WHERE x.student=? AND x.status=2 AND p.subject=? AND p.grade=? AND p.semester=?",
+                studentId, scope.subjectId(), grade, scope.semesterId());
+        String flexible;
+        if (individualSubject(c, scope.subjectId())) {
+            flexible = scalarString(c,
+                    "SELECT MAX(x.last_updated) FROM completed_flexible_tasks x JOIN flexible_tasks t ON t.id=x.flexible_task "
+                            + "WHERE x.student=? AND t.subject=? AND t.semester=? AND t.course_group=?",
+                    studentId, scope.subjectId(), scope.semesterId(), resolveScope(c, scope).courseGroupId());
+        } else {
+            flexible = scalarString(c,
+                    "SELECT MAX(x.last_updated) FROM completed_flexible_tasks x JOIN flexible_tasks t ON t.id=x.flexible_task "
+                            + "WHERE x.student=? AND t.subject=? AND t.semester=? AND t.owner_teacher=? AND t.class=?",
+                    studentId, scope.subjectId(), scope.semesterId(), scope.teacherId(), scope.classId());
+        }
+        if (central == null) return flexible;
+        if (flexible == null) return central;
+        return central.compareTo(flexible) >= 0 ? central : flexible;
+    }
+    private static String scalarString(Connection c, String sql, Object... args) throws SQLException {
+        try (PreparedStatement statement = c.prepareStatement(sql)) {
+            for (int i = 0; i < args.length; i++) statement.setObject(i + 1, args[i]);
+            try (ResultSet result = statement.executeQuery()) {
+                return result.next() ? result.getString(1) : null;
+            }
+        }
     }
     private static int subjectOrder(String code) {
         return switch (code) { case "DE","Deutsch" -> 1; case "EN","Englisch" -> 2; case "MATH","Mathematik" -> 3; case "GL","Gesellschaftslehre" -> 4; case "NAWI","Naturwissenschaften" -> 5; case "WPF" -> 6; default -> 50; };

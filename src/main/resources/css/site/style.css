@@ -210,7 +210,7 @@ table tr:last-child td {
   --admin-muted:#6d5b55;
   --admin-danger:#8b3028;
   max-width:none;
-  width:100%;
+  width:max-content;
   margin:0 auto;
   padding:clamp(1rem, 2.5vw, 2rem);
   box-sizing:border-box;
@@ -748,7 +748,7 @@ main.attendance.teacher-dashboard #manual:focus { background:#17324d; }
   background:#fff;
 }
 .teacher-weekly-conversations .teacher-weekly-table {
-  width:max-content;
+  width:100%;
   min-width:100%;
   margin-top:0;
   table-layout:auto;
@@ -759,28 +759,30 @@ main.attendance.teacher-dashboard #manual:focus { background:#17324d; }
   border-radius:0;
 }
 .teacher-weekly-conversations .teacher-weekly-table thead {
-  position:relative;
+  position:sticky;
+  top:0;
   z-index:4;
 }
 .teacher-weekly-conversations .teacher-weekly-table th,
 .teacher-weekly-conversations .teacher-weekly-table td {
-  min-width:8rem;
-  padding:.45rem .55rem;
+  min-width:5.75rem;
+  padding:.3rem .35rem;
   vertical-align:top;
   overflow-wrap:anywhere;
 }
 .teacher-weekly-conversations .teacher-weekly-table th:first-child,
 .teacher-weekly-conversations .teacher-weekly-table td:first-child {
-  min-width:13rem;
-  width:13rem;
+  min-width:10.5rem;
+  width:10.5rem;
 }
 .teacher-weekly-conversations .teacher-weekly-table tbody tr:nth-child(even) { background:#f8fbfd; }
 .teacher-weekly-conversations .teacher-weekly-table tbody tr:nth-child(odd) { background:#fff; }
 .teacher-weekly-conversations .teacher-weekly-table tbody tr:hover { background:#eaf3fb; }
 .teacher-weekly-conversations .teacher-weekly-table th:first-child,
 .teacher-weekly-conversations .teacher-weekly-table td:first-child {
-  position:relative;
-  z-index:1;
+  position:sticky;
+  left:0;
+  z-index:3;
   background:inherit;
 }
 /* Attendance-Filter: einheitliche Feldhöhen, Beschriftung über dem Feld, aufklappbare Klassenwahl. */
@@ -815,13 +817,21 @@ main.attendance .attendance-class-picker-panel:empty::before { content:'Keine Kl
 }
 
 .teacher-weekly-conversations .teacher-weekly-table .teacher-weekly-header th {
-    z-index: 2;
+    position:sticky;
+    top:0;
+    z-index:2;
     background: #2c668e;
     color:#fff;
     border-bottom:2px solid #17324d;
 }
+.teacher-weekly-conversations .teacher-weekly-table .teacher-weekly-header th:first-child {
+    z-index:4;
+    background:#2c668e;
+}
 .teacher-weekly-conversations .teacher-weekly-table .teacher-weekly-groups th {
-    z-index: 3;
+    position:sticky;
+    top:0;
+    z-index:3;
     background: #17324d;
     color:#fff;
     border-bottom:1px solid #d9e1ea;
