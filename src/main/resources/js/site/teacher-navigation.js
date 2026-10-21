@@ -42,6 +42,16 @@
         item.append(link); progress.closest('li')?.after(item);
     }
 
+    function freistellungItem(navigation) {
+        if ([...navigation.querySelectorAll('a[href]')].some(link => link.getAttribute('href') === '/freistellung')) return;
+        const progress = [...navigation.querySelectorAll('a[href]')]
+            .find(link => link.getAttribute('href') === '/dashboard#student-progress');
+        if (!progress) return;
+        const item = document.createElement('li');
+        const link = document.createElement('a'); link.href = '/freistellung'; link.textContent = 'Freistellung';
+        item.append(link); progress.closest('li')?.after(item);
+    }
+
     function removeTutorAreaItem() {
         document.querySelectorAll(`a[href="${tutorAreaPath}"]`).forEach(link => {
             const item = link.closest('li');
@@ -137,7 +147,7 @@
         }
 
         const navigation = document.querySelector('.teacher-main-menu');
-        if (navigation) { integrateTeacherLogout(navigation); schoolwideOverviewItem(navigation); }
+        if (navigation) { integrateTeacherLogout(navigation); schoolwideOverviewItem(navigation); freistellungItem(navigation); }
 
         markActive();
 

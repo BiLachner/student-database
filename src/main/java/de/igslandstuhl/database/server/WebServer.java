@@ -41,6 +41,7 @@ import de.igslandstuhl.database.server.webserver.sessions.SessionManager;
  * It supports GET and POST requests for login, subject requests, current topics, tasks, and room updates.
  */
 public class WebServer implements Runnable {
+    private static final int MAX_MULTIPART_REQUEST_BYTES = 2 * 1024 * 1024 + 64 * 1024;
     public static final int SESSION_DURATION = 21600; // six hours
     public static final int MAXIMUM_INACTIVITY_DURATION = 3600; // An hour
     public static final int ANONYMOUS_RATELIMIT = 180;
@@ -145,14 +146,29 @@ public class WebServer implements Runnable {
             Map<String, String> headerMap = parseHeaders(headerString);
             HttpHeader postHeader = new HttpHeader(headerString);
             int contentLength = headerMap.containsKey("content-length") ? Integer.parseInt(headerMap.get("content-length")) : 0;
-            Charset bodyCharset = determineCharset(headerMap.get("content-type"));
+            String requestContentType = headerMap.get("content-type");
+            if (requestContentType != null && requestContentType.toLowerCase(Locale.ROOT).startsWith("multipart/")
+                    && contentLength > MAX_MULTIPART_REQUEST_BYTES) {
+                PostRequest rejected = new PostRequest(postHeader, "", clientIp, secure);
+                PostResponse.badRequest("Multipart-Anfrage überschreitet das zulässige Limit.", rejected).respond(out);
+                return;
+            }
+            Charset bodyCharset = determineCharset(requestContentType);
             String body = null;
+            byte[] rawBody = null;
             if (contentLength > 0) {
                 byte[] bodyBytes = readNBytes(in, contentLength);
-                String raw = new String(bodyBytes, bodyCharset);
-                body = URLDecoder.decode(raw, bodyCharset.name());
+                if (requestContentType != null && (requestContentType.toLowerCase(Locale.ROOT).startsWith("multipart/")
+                        || requestContentType.toLowerCase(Locale.ROOT).startsWith("application/pdf"))) {
+                    rawBody = bodyBytes;
+                } else {
+                    String raw = new String(bodyBytes, bodyCharset);
+                    body = URLDecoder.decode(raw, bodyCharset.name());
+                }
             }
-            PostRequest parsedRequest = new PostRequest(postHeader, body, clientIp, secure);
+            PostRequest parsedRequest = rawBody == null
+                    ? new PostRequest(postHeader, body, clientIp, secure)
+                    : new PostRequest(postHeader, rawBody, clientIp, secure);
 
             SessionValidationResult v = Server.getInstance().getWebServer().getSessionManager().validateSession(parsedRequest);
             HttpResponse response;

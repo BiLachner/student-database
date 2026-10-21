@@ -20,6 +20,7 @@ public class HttpHeader {
     private final Cookie[] cookies;
     private final String userAgent;
     private final String acceptLanguage;
+    private final String contentType;
 
     /**
      * Constructs a new PostRequest with the given header and body.
@@ -34,14 +35,18 @@ public class HttpHeader {
         Cookie[] cookies = new Cookie[0];
         String userAgent = null;
         String acceptLanguage = null;
-        for (String line : header.split("\n")) {
-            if (line.startsWith("Content-Length:")) {
+        String contentType = null;
+        for (String rawLine : header.split("\n")) {
+            String line = rawLine.trim();
+            if (line.regionMatches(true, 0, "Content-Length:", 0, 15)) {
                 contentLength = Integer.parseInt(line.split(":")[1].trim());
-            } else if (line.startsWith("Cookie:")) {
+            } else if (line.regionMatches(true, 0, "Content-Type:", 0, 13)) {
+                contentType = line.substring(line.indexOf(':') + 1).trim();
+            } else if (line.regionMatches(true, 0, "Cookie:", 0, 7)) {
                 cookies = Cookie.parse(line.substring(7));
-            } else if (line.startsWith("User-Agent:")) {
+            } else if (line.regionMatches(true, 0, "User-Agent:", 0, 11)) {
                 userAgent = line.split(":")[1].trim();
-            } else if (line.startsWith("Accept-Language:")) {
+            } else if (line.regionMatches(true, 0, "Accept-Language:", 0, 16)) {
                 acceptLanguage = line.split(":")[1].trim();
             }
         }
@@ -49,6 +54,7 @@ public class HttpHeader {
         this.contentLength = contentLength;
         this.userAgent = userAgent;
         this.acceptLanguage = acceptLanguage;
+        this.contentType = contentType;
     }
 
     /**
@@ -78,5 +84,9 @@ public class HttpHeader {
 
     public String getAcceptLanguage() {
         return acceptLanguage;
+    }
+
+    public String getContentType() {
+        return contentType;
     }
 }
