@@ -38,7 +38,7 @@ test('tutor view offers only assigned classes and a printable compact table',asy
   await new Promise(resolve=>setTimeout(resolve,30));
   assert.equal(instance.window.document.querySelectorAll('.teacher-filter-bar option').length,2);
   assert.ok(instance.window.document.querySelector('.teacher-weekly-conversations').textContent.includes('Test Schüler'));
-  assert.ok(instance.window.document.querySelector('.teacher-weekly-conversations').textContent.includes('letztes GN: 20.10.2026'));
+  assert.ok(instance.window.document.querySelector('.teacher-weekly-conversations').textContent.includes('letzte Gutschrift: 20.10.2026'));
   assert.equal(instance.window.document.querySelectorAll('.teacher-filter-bar button').length,2);
   assert.equal(instance.window.document.querySelectorAll('.teacher-weekly-conversations tbody tr:first-child button').length,3);
   instance.window.close();

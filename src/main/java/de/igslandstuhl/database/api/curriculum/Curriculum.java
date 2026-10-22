@@ -1546,28 +1546,48 @@ public final class Curriculum {
             Map<String,Object> out=new LinkedHashMap<>(); out.put("semesterId",semester); out.put("semesterLabel",semesterLabel); out.put("classId",classId); out.put("classLabel",classRow.get("label")); out.put("subjects",subjects); out.put("students",output); return out;
         });
     }
-    /** The latest confirmed Gelingensnachweis, excluding Nanstein completions. */
-    private static String lastGnDate(Connection c, int studentId, Scope scope) throws SQLException {
-        int grade = resolveScope(c, scope).grade();
+    /** The latest positive subject-specific coin credit used as GN orientation. */
+    static String lastGnDate(Connection c, int studentId, Scope scope) throws SQLException {
+        ResolvedScope resolved = resolveScope(c, scope);
+        int grade = resolved.grade();
+        List<String> credits = new ArrayList<>();
         String central = scalarString(c,
                 "SELECT MAX(x.last_updated) FROM taskstats x JOIN tasks t ON t.id=x.task JOIN topics p ON p.id=t.topic "
-                        + "WHERE x.student=? AND x.status=2 AND p.subject=? AND p.grade=? AND p.semester=?",
+                        + "WHERE x.student=? AND x.status=2 AND t.tokens>0 AND p.subject=? AND p.grade=? AND p.semester=?",
                 studentId, scope.subjectId(), grade, scope.semesterId());
+        if (central != null) credits.add(central);
+
         String flexible;
-        if (individualSubject(c, scope.subjectId())) {
+        if (resolved.individual()) {
             flexible = scalarString(c,
                     "SELECT MAX(x.last_updated) FROM completed_flexible_tasks x JOIN flexible_tasks t ON t.id=x.flexible_task "
-                            + "WHERE x.student=? AND t.subject=? AND t.semester=? AND t.course_group=?",
-                    studentId, scope.subjectId(), scope.semesterId(), resolveScope(c, scope).courseGroupId());
+                            + "WHERE x.student=? AND COALESCE(x.awarded_tokens,t.tokens)>0 AND t.subject=? AND t.semester=? AND t.course_group=?",
+                    studentId, scope.subjectId(), scope.semesterId(), resolved.courseGroupId());
         } else {
             flexible = scalarString(c,
                     "SELECT MAX(x.last_updated) FROM completed_flexible_tasks x JOIN flexible_tasks t ON t.id=x.flexible_task "
-                            + "WHERE x.student=? AND t.subject=? AND t.semester=? AND t.owner_teacher=? AND t.class=?",
+                            + "WHERE x.student=? AND COALESCE(x.awarded_tokens,t.tokens)>0 AND t.subject=? AND t.semester=? AND t.owner_teacher=? AND t.class=?",
                     studentId, scope.subjectId(), scope.semesterId(), scope.teacherId(), scope.classId());
         }
-        if (central == null) return flexible;
-        if (flexible == null) return central;
-        return central.compareTo(flexible) >= 0 ? central : flexible;
+        if (flexible != null) credits.add(flexible);
+
+        boolean nansteinCreditTimestamp = number(c, "SELECT COUNT(*) FROM pragma_table_info('curriculum_nanstein_completions') WHERE name='completed_at'") > 0;
+        if (nansteinCreditTimestamp) {
+            String nanstein;
+            if (resolved.individual()) {
+                nanstein = scalarString(c,
+                        "SELECT MAX(x.completed_at) FROM curriculum_nanstein_completions x JOIN curriculum_nansteine n ON n.id=x.nanstein "
+                                + "WHERE x.student=? AND x.tokens>0 AND n.subject=? AND n.semester=? AND n.course_group=?",
+                        studentId, scope.subjectId(), scope.semesterId(), resolved.courseGroupId());
+            } else {
+                nanstein = scalarString(c,
+                        "SELECT MAX(x.completed_at) FROM curriculum_nanstein_completions x JOIN curriculum_nansteine n ON n.id=x.nanstein "
+                                + "WHERE x.student=? AND x.tokens>0 AND n.subject=? AND n.semester=? AND n.owner_teacher=? AND n.class=?",
+                        studentId, scope.subjectId(), scope.semesterId(), scope.teacherId(), scope.classId());
+            }
+            if (nanstein != null) credits.add(nanstein);
+        }
+        return credits.stream().max(String::compareTo).orElse(null);
     }
     private static String scalarString(Connection c, String sql, Object... args) throws SQLException {
         try (PreparedStatement statement = c.prepareStatement(sql)) {

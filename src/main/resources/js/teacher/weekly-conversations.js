@@ -56,7 +56,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     else {
                         td.append(el('div', `${cell.totalTokens} 🪙`));
                         const gn = cell.lastGnDate ? formatGnDate(cell.lastGnDate) : 'noch kein GN';
-                        td.append(el('small', `letztes GN: ${gn}`));
+                        td.append(el('small', gn === 'noch kein GN' ? gn : `letzte Gutschrift: ${gn}`));
                     }
                 }
             }

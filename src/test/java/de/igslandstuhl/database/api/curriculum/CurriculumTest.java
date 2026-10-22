@@ -96,6 +96,42 @@ class CurriculumTest {
         assertEquals(2,Curriculum.noteForTokens(75));
         assertEquals(1,Curriculum.noteForTokens(90));
     }
+    @Test void lastGnDateUsesLatestPositiveScopedCoinCredit() throws Exception {
+        try (Connection c=DriverManager.getConnection("jdbc:sqlite::memory:")) {
+            exec(c,"CREATE TABLE subjects(id INTEGER PRIMARY KEY)");
+            exec(c,"CREATE TABLE classes(id INTEGER PRIMARY KEY,grade INTEGER)");
+            exec(c,"CREATE TABLE curriculum_subject_types(subject INTEGER,mode TEXT,assignment_group TEXT)");
+            exec(c,"CREATE TABLE topics(id INTEGER PRIMARY KEY,subject INTEGER,grade INTEGER,semester INTEGER)");
+            exec(c,"CREATE TABLE tasks(id INTEGER PRIMARY KEY,topic INTEGER,tokens INTEGER)");
+            exec(c,"CREATE TABLE taskstats(student INTEGER,task INTEGER,status INTEGER,last_updated TEXT)");
+            exec(c,"CREATE TABLE flexible_tasks(id INTEGER PRIMARY KEY,subject INTEGER,semester INTEGER,owner_teacher INTEGER,class INTEGER,tokens INTEGER,course_group INTEGER)");
+            exec(c,"CREATE TABLE completed_flexible_tasks(student INTEGER,flexible_task INTEGER,last_updated TEXT,awarded_tokens INTEGER)");
+            exec(c,"CREATE TABLE curriculum_nansteine(id INTEGER PRIMARY KEY,owner_teacher INTEGER,subject INTEGER,class INTEGER,semester INTEGER,tokens INTEGER,course_group INTEGER)");
+            exec(c,"CREATE TABLE curriculum_nanstein_completions(nanstein INTEGER,student INTEGER,teacher INTEGER,tokens INTEGER,completed_at TEXT)");
+            exec(c,"INSERT INTO subjects VALUES(1),(2)");
+            exec(c,"INSERT INTO classes VALUES(30,5),(31,5)");
+            exec(c,"INSERT INTO curriculum_subject_types VALUES(1,'REGULAR',NULL),(2,'REGULAR',NULL)");
+            exec(c,"INSERT INTO topics VALUES(100,1,5,10),(101,2,5,10)");
+            exec(c,"INSERT INTO tasks VALUES(200,100,5),(201,101,5)");
+            exec(c,"INSERT INTO flexible_tasks VALUES(300,1,10,20,30,6,NULL),(301,2,10,20,30,6,NULL)");
+            exec(c,"INSERT INTO curriculum_nansteine VALUES(400,20,1,30,10,7,NULL)");
+            Curriculum.Scope scope=new Curriculum.Scope(20,1,30,10);
+            assertNull(Curriculum.lastGnDate(c,40,scope));
+            exec(c,"INSERT INTO taskstats VALUES(40,200,2,'2026-10-20 10:00:00')");
+            assertEquals("2026-10-20 10:00:00",Curriculum.lastGnDate(c,40,scope));
+            exec(c,"INSERT INTO completed_flexible_tasks VALUES(40,300,'2026-10-21 10:00:00',6)");
+            assertEquals("2026-10-21 10:00:00",Curriculum.lastGnDate(c,40,scope));
+            exec(c,"INSERT INTO completed_flexible_tasks VALUES(40,301,'2026-10-30 10:00:00',0)");
+            exec(c,"INSERT INTO curriculum_nanstein_completions VALUES(400,40,20,7,NULL)");
+            assertEquals("2026-10-21 10:00:00",Curriculum.lastGnDate(c,40,scope));
+            exec(c,"UPDATE curriculum_nanstein_completions SET completed_at='2026-10-22 10:00:00' WHERE nanstein=400 AND student=40");
+            assertEquals("2026-10-22 10:00:00",Curriculum.lastGnDate(c,40,scope));
+            exec(c,"INSERT INTO taskstats VALUES(40,201,2,'2026-12-01 10:00:00')");
+            assertEquals("2026-10-22 10:00:00",Curriculum.lastGnDate(c,40,scope));
+            exec(c,"UPDATE taskstats SET status=1,last_updated='2026-12-02 10:00:00' WHERE student=40 AND task=200");
+            assertEquals("2026-10-22 10:00:00",Curriculum.lastGnDate(c,40,scope));
+        }
+    }
     @Test void classSubjectTeacherChangeSynchronizesExistingRegularContextAtomically() throws Exception {
         db.writeTransaction(c->{exec(c,"INSERT OR IGNORE INTO curriculum_subject_types(subject,mode,assignment_group) VALUES(?, 'REGULAR', NULL)",id);exec(c,"INSERT INTO curriculum_class_teachers(semester,class,subject,teacher) VALUES(?,?,?,?)",id,id,id,id);return null;});
         new CurriculumEnrollment(service).assignClassSubjectTeacher(admin,id,id,id,id+1);
