@@ -145,7 +145,8 @@ class CurriculumTest {
             exec(c,"INSERT OR IGNORE INTO curriculum_subject_types(subject,mode,assignment_group) VALUES(?, 'REGULAR', NULL)",id);
             exec(c,"CREATE TABLE IF NOT EXISTS curriculum_nansteine(id INTEGER PRIMARY KEY,owner_teacher INTEGER,subject INTEGER,class INTEGER,semester INTEGER,grade INTEGER,course_group INTEGER,name TEXT,tokens INTEGER)");
             exec(c,"CREATE TABLE IF NOT EXISTS curriculum_nanstein_assignments(nanstein INTEGER,student INTEGER,PRIMARY KEY(nanstein,student))");
-            exec(c,"CREATE TABLE IF NOT EXISTS curriculum_nanstein_completions(nanstein INTEGER,student INTEGER,teacher INTEGER,tokens INTEGER,PRIMARY KEY(nanstein,student))");
+            exec(c,"CREATE TABLE IF NOT EXISTS curriculum_nanstein_completions(nanstein INTEGER,student INTEGER,teacher INTEGER,tokens INTEGER,completed_at TEXT,PRIMARY KEY(nanstein,student))");
+            try { exec(c,"ALTER TABLE curriculum_nanstein_completions ADD COLUMN completed_at TEXT"); } catch (SQLException ignored) { /* already present in the synthetic schema */ }
             return null;
         });
         var extra=service.createNanstein(teacher,scope,"Individuelle Hilfe",7);
@@ -160,6 +161,7 @@ class CurriculumTest {
         assertEquals(true,completedStatus.get("assigned")); assertEquals(true,completedStatus.get("completed"));
         var progress=service.progress(teacher,id,scope);
         assertEquals(7L,progress.get("nansteinTokens")); assertEquals(7L,progress.get("totalTokens"));
+        assertNotNull(Curriculum.lastGnDate(db.getSQLConnection(),id,scope));
         assertThrows(CurriculumException.class,()->service.completeNanstein(teacher,extra.id(),id));
     }
     @Test void tutorGraduationWritesCanonicalStudentValueAndHistoryUsedByOverview() throws Exception {

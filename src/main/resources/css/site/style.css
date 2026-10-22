@@ -250,6 +250,7 @@ body:has(.admin-shell) > header { display:none; }
 .admin-shell#teachers,
 .admin-shell#classes,
 .admin-shell#subjects { max-width:none; }
+.admin-shell#admin-plugins { width:100%; }
 .admin-shell #admin-central-curriculum { min-width:0; max-width:100%; overflow-x:auto; }
 .admin-shell #admin-central-curriculum table { min-width:42rem; }
 .admin-shell .admin-main-menu-logout { background:var(--admin-sandstone-950); }

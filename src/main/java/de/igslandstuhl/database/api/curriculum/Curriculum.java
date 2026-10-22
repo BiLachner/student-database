@@ -658,7 +658,7 @@ public final class Curriculum {
         transaction(c->{var n=nanstein(require(c,"SELECT * FROM curriculum_nansteine WHERE id=?",nansteinId)); authorize(c,actor,new Scope(n.ownerTeacher(),n.subjectId(),n.classId(),n.semesterId(),n.courseGroupId()),false);
             if(number(c,"SELECT COUNT(*) FROM curriculum_nanstein_assignments WHERE nanstein=? AND student=?",nansteinId,studentId)==0) throw error(409,"nanstein_not_assigned","Der Nanstein wurde diesem Schüler noch nicht zugewiesen.");
             if(number(c,"SELECT COUNT(*) FROM curriculum_nanstein_completions WHERE nanstein=? AND student=?",nansteinId,studentId)>0) throw error(409,"nanstein_already_completed","Dieser Nanstein wurde bereits gutgeschrieben.");
-            write(c,"INSERT INTO curriculum_nanstein_completions(nanstein,student,teacher,tokens) VALUES(?,?,?,?)",nansteinId,studentId,actor.teacherId(),n.tokens()); return null;});
+            write(c,"INSERT INTO curriculum_nanstein_completions(nanstein,student,teacher,tokens,completed_at) VALUES(?,?,?,?,CURRENT_TIMESTAMP)",nansteinId,studentId,actor.teacherId(),n.tokens()); return null;});
     }
     public int createFlexibleTopic(Actor actor,Scope scope,String name) throws SQLException {
         String value=validName(name);

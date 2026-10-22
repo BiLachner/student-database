@@ -85,6 +85,11 @@ test('admin semester setup grids and assignment tables stay locally scrollable o
   assert.match(css,/\.admin-shell \.semester-landing > \*/);
 });
 
+test('plugins page uses the normal admin content width locally',()=>{
+  const css=read('css/site/style.css');
+  assert.match(css,/\.admin-shell#admin-plugins\s*\{[^}]*width:\s*100%/);
+});
+
 test('admin status regions are announced and forms have real associated labels',()=>{
   for (const name of ['students','teachers','classes','schoolClass','student','teacher','subject']) {
     const dom=new JSDOM(`<body>${render(name)}</body>`);
