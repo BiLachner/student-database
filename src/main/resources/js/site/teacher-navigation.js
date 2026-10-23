@@ -22,13 +22,7 @@
         link.href = tutorAreaPath;
         link.textContent = 'Tutorenbereich';
         item.append(link);
-        const attendanceLink = [...navigation.querySelectorAll('a[href]')]
-            .find(link => link.getAttribute('href') === '/attendance');
-        const schoolwide = [...navigation.querySelectorAll('a[href]')]
-            .find(link => link.getAttribute('href') === '/dashboard#schoolwide-stage-overview');
-        if (schoolwide?.closest('li')) schoolwide.closest('li').before(item);
-        else if (attendanceLink?.closest('li')) attendanceLink.closest('li').before(item);
-        else studentProgressLink.closest('li')?.after(item);
+        studentProgressLink.closest('li')?.after(item);
         return item;
     }
 

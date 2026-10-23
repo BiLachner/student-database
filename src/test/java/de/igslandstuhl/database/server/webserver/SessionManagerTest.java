@@ -10,6 +10,8 @@ import java.lang.reflect.Field;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -98,6 +100,33 @@ public class SessionManagerTest {
         assertEquals(SessionValidationResult.OK, limited.validateSession(authenticatedRequest));
         assertEquals(SessionValidationResult.RATE_LIMITED, limited.validateSession(authenticatedRequest));
         assertEquals(teacher.getUsername(), limited.getSessionUser(authenticatedRequest).getUsername());
+    }
+
+    @Test
+    void fixedWindowDoesNotCountRejectedRequestsAndExpiresDeterministically() {
+        AtomicLong now=new AtomicLong(1_000_000L);
+        SessionManager limited=new SessionManager(Integer.MAX_VALUE,Integer.MAX_VALUE,2,2,2,60,now::get);
+        PostRequest request=new PostRequest("GET /dashboard HTTP/1.1",null,LOCALHOST,true);
+        String cookie=limited.getSession(request).createSessionCookie().toString();
+        PostRequest withCookie=new PostRequest("GET /dashboard HTTP/1.1\r\nCookie: "+cookie,null,LOCALHOST,true);
+        assertEquals(SessionValidationResult.OK,limited.validateSession(withCookie));
+        assertEquals(SessionValidationResult.OK,limited.validateSession(withCookie));
+        assertEquals(SessionValidationResult.RATE_LIMITED,limited.validateSession(withCookie));
+        assertEquals(60,limited.retryAfterSeconds(withCookie));
+        assertEquals(SessionValidationResult.RATE_LIMITED,limited.validateSession(withCookie));
+        now.addAndGet(59_000L); assertEquals(1,limited.retryAfterSeconds(withCookie));
+        now.addAndGet(1_000L); assertEquals(SessionValidationResult.OK,limited.validateSession(withCookie));
+    }
+
+    @Test
+    void concurrentRequestsConsumeOnlyAvailableSlotsPerSession() throws Exception {
+        SessionManager limited=new SessionManager(Integer.MAX_VALUE,Integer.MAX_VALUE,3,3,3,60,() -> 2_000_000L);
+        PostRequest seed=new PostRequest("GET /dashboard HTTP/1.1",null,LOCALHOST,true);
+        String cookie=limited.getSession(seed).createSessionCookie().toString();
+        PostRequest request=new PostRequest("GET /dashboard HTTP/1.1\r\nCookie: "+cookie,null,LOCALHOST,true);
+        int workers=20; CountDownLatch start=new CountDownLatch(1); CountDownLatch done=new CountDownLatch(workers); AtomicLong accepted=new AtomicLong();
+        for(int i=0;i<workers;i++) new Thread(() -> { try { start.await(); if(limited.validateSession(request)==SessionValidationResult.OK) accepted.incrementAndGet(); } catch(Exception e) { throw new AssertionError(e); } finally { done.countDown(); } }).start();
+        start.countDown(); done.await(); assertEquals(3,accepted.get());
     }
 
     @Test

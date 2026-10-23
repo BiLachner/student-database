@@ -35,7 +35,7 @@ public class GetRequestHandler {
         SessionValidationResult v = sessionManager.validateSession(request);
         if(v != SessionValidationResult.OK){
             return switch (v){
-                case RATE_LIMITED -> GetResponse.tooManyRequests(request);
+                case RATE_LIMITED -> GetResponse.tooManyRequests("Too Many Requests", request, sessionManager.retryAfterSeconds(request));
                 case INVALID_SESSION -> GetResponse.unauthorized("Invalid Session", request);
                 default -> GetResponse.unauthorized("Invalid Session", request);
             };

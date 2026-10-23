@@ -174,7 +174,7 @@ public class WebServer implements Runnable {
             HttpResponse response;
             switch(v) {
                 case OK -> response = PostRequestHandler.getInstance().handlePostRequest(parsedRequest);            //OK
-                case RATE_LIMITED -> response = PostResponse.tooManyRequests("Too Many Requests", parsedRequest);    //429
+                case RATE_LIMITED -> response = PostResponse.tooManyRequests("Too Many Requests", parsedRequest, userManager.retryAfterSeconds(parsedRequest));    //429
                 case INVALID_SESSION -> response = PostResponse.unauthorized("Invalid Session", parsedRequest); //401
                 default -> response = PostResponse.unauthorized("Invalid Session", parsedRequest);
             }

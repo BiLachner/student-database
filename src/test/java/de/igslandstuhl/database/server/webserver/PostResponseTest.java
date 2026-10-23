@@ -91,6 +91,13 @@ public class PostResponseTest {
     }
 
     @Test
+    void rateLimitResponseCarriesRetryAfter() {
+        String response=read(PostResponse.tooManyRequests("Bitte warten",initialRequest,17));
+        assert response.contains("429");
+        assert response.contains("Retry-After: 17");
+    }
+
+    @Test
     void debugLogContainsOnlyResponseMetadata() {
         Logger logger = (Logger) LoggerFactory.getLogger(Server.class);
         Level previousLevel = logger.getLevel();

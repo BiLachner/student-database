@@ -1,11 +1,46 @@
+let arcanumRateLimitGate = Promise.resolve();
+let arcanumRateLimitUntil = 0;
+
+function arcanumRetryAfterMs(response) {
+    const seconds = Number.parseInt(response.headers?.get?.('Retry-After') || '', 10);
+    return Number.isFinite(seconds) && seconds >= 0 ? Math.min(seconds, 300) * 1000 : 60000;
+}
+
+function arcanumRateLimitedRetry(response) {
+    const delay = arcanumRetryAfterMs(response);
+    const start = Math.max(Date.now(), arcanumRateLimitUntil);
+    arcanumRateLimitUntil = start + delay;
+    const retry = arcanumRateLimitGate.then(async () => {
+        const wait = Math.max(0, start - Date.now());
+        if (wait) await new Promise(resolve => window.setTimeout(resolve, wait));
+        return undefined;
+    });
+    arcanumRateLimitGate = retry.then(() => undefined, () => undefined);
+    return retry;
+}
+
+async function fetchWithRateLimit(url, options = {}, retry = true) {
+    await arcanumRateLimitGate;
+    const response = await fetch(url, options);
+    if (response.status === 429 && retry && (options.method || 'GET').toUpperCase() === 'GET') {
+        await arcanumRateLimitedRetry(response);
+        return fetchWithRateLimit(url, options, false);
+    }
+    if (response.status === 429 && retry && options.rateLimitSafe === true) {
+        await arcanumRateLimitedRetry(response);
+        return fetchWithRateLimit(url, options, false);
+    }
+    return response;
+}
+
 async function fetchJson(url, options) {
-    const res = await fetch(url, options);
+    const res = await fetchWithRateLimit(url, options);
     if (res.ok){
         return await res.json();
     }
 }
 async function fetchJsonStrict(url, options) {
-    const res = await fetch(url, options);
+    const res = await fetchWithRateLimit(url, options);
     let payload;
     try {
         payload = await res.json();
@@ -27,7 +62,8 @@ async function getJsonWithPost(url, data) {
     return await fetchJson(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
+        body: JSON.stringify(data),
+        rateLimitSafe: true
     });
 }
 async function post(url, data) {
@@ -92,14 +128,16 @@ async function fetchMyManagedSubjects() {
     return await fetchJsonStrict('/my-curriculum-subjects', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({})
+        body: JSON.stringify({}),
+        rateLimitSafe: true
     });
 }
 async function fetchMyCurriculumCatalog(subjectId) {
     return await fetchJsonStrict('/my-curriculum-catalog', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subjectId })
+        body: JSON.stringify({ subjectId }),
+        rateLimitSafe: true
     });
 }
 async function fetchStudentSubjects(studentId) {

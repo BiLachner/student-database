@@ -74,6 +74,9 @@ public class GetResponse implements HttpResponse {
      * @return the GetResponse object
      */
     public static GetResponse tooManyRequests(String message, HttpRequest request) {
+        return tooManyRequests(message, request, 60);
+    }
+    public static GetResponse tooManyRequests(String message, HttpRequest request, int retryAfterSeconds) {
         return new GetResponse(
                 request,
                 Status.TOO_MANY_REQUESTS,
@@ -81,7 +84,8 @@ public class GetResponse implements HttpResponse {
                 ContentType.HTML,
                 message,
                 false,
-                false
+                false,
+                new String[] {"Retry-After: " + Math.max(1, retryAfterSeconds)}
         );
     }
 
@@ -122,6 +126,7 @@ public class GetResponse implements HttpResponse {
 
     private final boolean isTemplating;
     private final boolean isMerging;
+    private final String[] headers;
     private final CspNonce cspNonce = CspNonce.create();
 
     /**
@@ -134,6 +139,9 @@ public class GetResponse implements HttpResponse {
      * @param isTemplating whether the resource is a templated resource
      */
     public GetResponse(HttpRequest request, Status status, ResourceLocation resourceLocation, ContentType contentType, String user, boolean isTemplating, boolean isMerging) {
+        this(request,status,resourceLocation,contentType,user,isTemplating,isMerging,new String[0]);
+    }
+    private GetResponse(HttpRequest request, Status status, ResourceLocation resourceLocation, ContentType contentType, String user, boolean isTemplating, boolean isMerging, String[] headers) {
         this.status = status;
         this.resourceLocation = resourceLocation;
         this.contentType = contentType;
@@ -141,6 +149,7 @@ public class GetResponse implements HttpResponse {
         this.request = request;
         this.isTemplating = isTemplating;
         this.isMerging = isMerging;
+        this.headers = headers == null ? new String[0] : headers;
     }
     /**
      * Returns a response for a GET request for the given resource.
@@ -220,6 +229,7 @@ public class GetResponse implements HttpResponse {
                 out.print("Set-Cookie: " + Server.getInstance().getWebServer().getSessionManager().getSession(request).createSessionCookie().toSetCookieHeader() + "\r\n");
             }
             out.print("Content-Length: " + body.length + "\r\n");
+            for (String header : headers) out.print(header + "\r\n");
             out.print("\r\n");
             out.write(body);
             out.flush();
