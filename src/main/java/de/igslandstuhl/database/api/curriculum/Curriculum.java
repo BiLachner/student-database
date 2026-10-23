@@ -658,7 +658,7 @@ public final class Curriculum {
         transaction(c->{var n=nanstein(require(c,"SELECT * FROM curriculum_nansteine WHERE id=?",nansteinId)); authorize(c,actor,new Scope(n.ownerTeacher(),n.subjectId(),n.classId(),n.semesterId(),n.courseGroupId()),false);
             if(number(c,"SELECT COUNT(*) FROM curriculum_nanstein_assignments WHERE nanstein=? AND student=?",nansteinId,studentId)==0) throw error(409,"nanstein_not_assigned","Der Nanstein wurde diesem Schüler noch nicht zugewiesen.");
             if(number(c,"SELECT COUNT(*) FROM curriculum_nanstein_completions WHERE nanstein=? AND student=?",nansteinId,studentId)>0) throw error(409,"nanstein_already_completed","Dieser Nanstein wurde bereits gutgeschrieben.");
-            write(c,"INSERT INTO curriculum_nanstein_completions(nanstein,student,teacher,tokens) VALUES(?,?,?,?)",nansteinId,studentId,actor.teacherId(),n.tokens()); return null;});
+            write(c,"INSERT INTO curriculum_nanstein_completions(nanstein,student,teacher,tokens,completed_at) VALUES(?,?,?,?,CURRENT_TIMESTAMP)",nansteinId,studentId,actor.teacherId(),n.tokens()); return null;});
     }
     public int createFlexibleTopic(Actor actor,Scope scope,String name) throws SQLException {
         String value=validName(name);
@@ -1531,6 +1531,7 @@ public final class Curriculum {
                         Map<String,Object> totals=progress(c,studentId,new Scope(teacherId,subjectId,classId,semester));
                         long total=((Number)totals.get("totalTokens")).longValue(); cell.put("totalTokens",total); cell.put("note",noteForTokens(total));
                         cell.put("assigned",true); cell.put("actualSubjectId",subjectId);
+                        cell.put("lastGnDate", lastGnDate(c, studentId, new Scope(teacherId, subjectId, classId, semester)));
                         List<Map<String,Object>> stages=new ArrayList<>();
                         @SuppressWarnings("unchecked") List<CompletedCentralTask> central=(List<CompletedCentralTask>)totals.get("completedCentralTasks");
                         for (var stage:central) { Map<String,Object> done=new LinkedHashMap<>(); done.put("id",stage.id()); done.put("name",stage.name()); done.put("niveau",stage.niveau()); done.put("tokens",stage.tokens()); stages.add(done); }
@@ -1544,6 +1545,55 @@ public final class Curriculum {
             }
             Map<String,Object> out=new LinkedHashMap<>(); out.put("semesterId",semester); out.put("semesterLabel",semesterLabel); out.put("classId",classId); out.put("classLabel",classRow.get("label")); out.put("subjects",subjects); out.put("students",output); return out;
         });
+    }
+    /** The latest positive subject-specific coin credit used as GN orientation. */
+    static String lastGnDate(Connection c, int studentId, Scope scope) throws SQLException {
+        ResolvedScope resolved = resolveScope(c, scope);
+        int grade = resolved.grade();
+        List<String> credits = new ArrayList<>();
+        String central = scalarString(c,
+                "SELECT MAX(x.last_updated) FROM taskstats x JOIN tasks t ON t.id=x.task JOIN topics p ON p.id=t.topic "
+                        + "WHERE x.student=? AND x.status=2 AND t.tokens>0 AND p.subject=? AND p.grade=? AND p.semester=?",
+                studentId, scope.subjectId(), grade, scope.semesterId());
+        if (central != null) credits.add(central);
+        String flexible;
+        if (resolved.individual()) {
+            flexible = scalarString(c,
+                    "SELECT MAX(x.last_updated) FROM completed_flexible_tasks x JOIN flexible_tasks t ON t.id=x.flexible_task "
+                            + "WHERE x.student=? AND COALESCE(x.awarded_tokens,t.tokens)>0 AND t.subject=? AND t.semester=? AND t.course_group=?",
+                    studentId, scope.subjectId(), scope.semesterId(), resolved.courseGroupId());
+        } else {
+            flexible = scalarString(c,
+                    "SELECT MAX(x.last_updated) FROM completed_flexible_tasks x JOIN flexible_tasks t ON t.id=x.flexible_task "
+                            + "WHERE x.student=? AND COALESCE(x.awarded_tokens,t.tokens)>0 AND t.subject=? AND t.semester=? AND t.owner_teacher=? AND t.class=?",
+                    studentId, scope.subjectId(), scope.semesterId(), scope.teacherId(), scope.classId());
+        }
+        if (flexible != null) credits.add(flexible);
+        boolean nansteinCreditTimestamp = number(c, "SELECT COUNT(*) FROM pragma_table_info('curriculum_nanstein_completions') WHERE name='completed_at'") > 0;
+        if (nansteinCreditTimestamp) {
+            String nanstein;
+            if (resolved.individual()) {
+                nanstein = scalarString(c,
+                        "SELECT MAX(x.completed_at) FROM curriculum_nanstein_completions x JOIN curriculum_nansteine n ON n.id=x.nanstein "
+                                + "WHERE x.student=? AND x.tokens>0 AND n.subject=? AND n.semester=? AND n.course_group=?",
+                        studentId, scope.subjectId(), scope.semesterId(), resolved.courseGroupId());
+            } else {
+                nanstein = scalarString(c,
+                        "SELECT MAX(x.completed_at) FROM curriculum_nanstein_completions x JOIN curriculum_nansteine n ON n.id=x.nanstein "
+                                + "WHERE x.student=? AND x.tokens>0 AND n.subject=? AND n.semester=? AND n.owner_teacher=? AND n.class=?",
+                        studentId, scope.subjectId(), scope.semesterId(), scope.teacherId(), scope.classId());
+            }
+            if (nanstein != null) credits.add(nanstein);
+        }
+        return credits.stream().max(String::compareTo).orElse(null);
+    }
+    private static String scalarString(Connection c, String sql, Object... args) throws SQLException {
+        try (PreparedStatement statement = c.prepareStatement(sql)) {
+            for (int i = 0; i < args.length; i++) statement.setObject(i + 1, args[i]);
+            try (ResultSet result = statement.executeQuery()) {
+                return result.next() ? result.getString(1) : null;
+            }
+        }
     }
     private static int subjectOrder(String code) {
         return switch (code) { case "DE","Deutsch" -> 1; case "EN","Englisch" -> 2; case "MATH","Mathematik" -> 3; case "GL","Gesellschaftslehre" -> 4; case "NAWI","Naturwissenschaften" -> 5; case "WPF" -> 6; default -> 50; };
