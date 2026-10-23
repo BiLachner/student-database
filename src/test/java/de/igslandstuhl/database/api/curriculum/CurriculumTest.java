@@ -21,7 +21,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.*;
 
 class CurriculumTest {
-    static final AtomicInteger sequence=new AtomicInteger(20000);
+    static final AtomicInteger sequence=new AtomicInteger(2000000);
     SQLiteConnection db; Curriculum service; int id,topic;
     Curriculum.Actor admin=new Curriculum.Actor(true,0),teacher,other;
     Curriculum.Scope scope;
@@ -128,6 +128,43 @@ class CurriculumTest {
         assertEquals(1,((List<?>)progress.get("completedNansteine")).size());
         assertThrows(CurriculumException.class,()->service.completeNanstein(teacher,extra.id(),id));
     }
+    @Test void nansteinEditDeleteAndCompletionProtectionAreAtomicAndAuthorized() throws Exception {
+        db.writeTransaction(c->{
+            exec(c,"INSERT OR IGNORE INTO curriculum_subject_types(subject,mode,assignment_group) VALUES(?, 'REGULAR', NULL)",id);
+            exec(c,"CREATE TABLE IF NOT EXISTS curriculum_nansteine(id INTEGER PRIMARY KEY,owner_teacher INTEGER,subject INTEGER,class INTEGER,semester INTEGER,grade INTEGER,course_group INTEGER,name TEXT,tokens INTEGER)");
+            exec(c,"CREATE TABLE IF NOT EXISTS curriculum_nanstein_assignments(nanstein INTEGER,student INTEGER,PRIMARY KEY(nanstein,student))");
+            exec(c,"CREATE TABLE IF NOT EXISTS curriculum_nanstein_completions(nanstein INTEGER,student INTEGER,teacher INTEGER,tokens INTEGER,completed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(nanstein,student))");
+            exec(c,"UPDATE school_years SET start_date='2026-01-01',end_date='2027-12-31',current_semester=? WHERE id=?",id,id);
+            return null;
+        });
+        var editable=service.createNanstein(teacher,scope,"Editierbar",4);
+        service.editNanstein(teacher,editable.id(),"Geändert",6);
+        assertEquals("Geändert",service.nansteine(teacher,scope).stream().filter(n->n.id()==editable.id()).findFirst().orElseThrow().name());
+        service.assignNanstein(teacher,editable.id(),id);
+        var preview=service.nansteinDeletionPreview(teacher,editable.id());
+        assertEquals(1L,preview.get("assignmentCount")); assertEquals(true,preview.get("canDelete"));
+        service.deleteNanstein(teacher,editable.id());
+        assertEquals(0,scalar("SELECT COUNT(*) FROM curriculum_nanstein_assignments WHERE nanstein=?",editable.id()));
+        assertEquals(0,scalar("SELECT COUNT(*) FROM curriculum_nansteine WHERE id=?",editable.id()));
+
+        var rollback=service.createNanstein(teacher,scope,"Rollback",5);
+        service.assignNanstein(teacher,rollback.id(),id);
+        db.writeTransaction(c->{exec(c,"CREATE TRIGGER nanstein_delete_failure BEFORE DELETE ON curriculum_nansteine BEGIN SELECT RAISE(ABORT,'synthetic rollback'); END");return null;});
+        assertThrows(CurriculumException.class,()->service.deleteNanstein(teacher,rollback.id()));
+        db.writeTransaction(c->{exec(c,"DROP TRIGGER nanstein_delete_failure");return null;});
+        assertEquals(1,scalar("SELECT COUNT(*) FROM curriculum_nansteine WHERE id=?",rollback.id()));
+        assertEquals(1,scalar("SELECT COUNT(*) FROM curriculum_nanstein_assignments WHERE nanstein=?",rollback.id()));
+
+        var completed=service.createNanstein(teacher,scope,"Geschützt",8);
+        service.assignNanstein(teacher,completed.id(),id); service.completeNanstein(teacher,completed.id(),id);
+        assertThrows(CurriculumException.class,()->service.deleteNanstein(teacher,completed.id()));
+        assertThrows(CurriculumException.class,()->service.archiveNanstein(teacher,completed.id()));
+        assertThrows(CurriculumException.class,()->service.editNanstein(teacher,completed.id(),"Umbenannt",9));
+        service.editNanstein(teacher,completed.id(),"Umbenannt",8);
+        assertEquals(8,service.nansteine(teacher,scope).stream().filter(n->n.id()==completed.id()).findFirst().orElseThrow().tokens());
+        assertEquals(1,scalar("SELECT COUNT(*) FROM curriculum_nanstein_completions WHERE nanstein=?",completed.id()));
+        assertThrows(CurriculumException.class,()->service.deleteNanstein(other,completed.id()));
+    }
     @Test void tutorGraduationWritesCanonicalStudentValueAndHistoryUsedByOverview() throws Exception {
         db.writeTransaction(c->{
             exec(c,"UPDATE school_years SET current_semester=? WHERE id=?",id,id);
@@ -174,6 +211,21 @@ class CurriculumTest {
         assertEquals(3, Curriculum.competitionRank(List.of(100L, 90L, 80L, 80L), 80L));
         assertEquals(10, Curriculum.competitionRank(List.of(100L, 90L, 80L, 70L, 60L, 50L, 40L, 30L, 20L, 10L), 10L));
         assertEquals(11, Curriculum.competitionRank(List.of(100L, 90L, 80L, 70L, 60L, 50L, 40L, 30L, 20L, 10L), 0L));
+    }
+    @Test void tutorTop50UsesCurrentRankingOrderAndLimit() throws Exception {
+        db.writeTransaction(c->{
+            exec(c,"UPDATE school_years SET start_date='2026-01-01',end_date='2027-12-31',current_semester=? WHERE id=?",id,id);
+            exec(c,"INSERT INTO curriculum_class_tutors(semester,class,teacher,tutor_slot) VALUES(?,?,?,1)",id,id,id);
+            exec(c,"CREATE TABLE IF NOT EXISTS curriculum_nansteine(id INTEGER PRIMARY KEY,owner_teacher INTEGER,subject INTEGER,class INTEGER,semester INTEGER,grade INTEGER,course_group INTEGER,name TEXT,tokens INTEGER)");
+            exec(c,"CREATE TABLE IF NOT EXISTS curriculum_nanstein_completions(nanstein INTEGER,student INTEGER,teacher INTEGER,tokens INTEGER,completed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(nanstein,student))");
+            for(int n=0;n<51;n++) exec(c,"INSERT INTO students(id,first_name,last_name,email,password,class,graduation_level) VALUES(?,?,'Synthetic',?,'unused',?,1)",id+1000000+n,"Student-"+n,"student"+(id+1000000+n)+"@example.invalid",id);
+            return null;
+        });
+        var result=service.top50ForTutor(teacher,5);
+        assertEquals(50,((List<?>)result.get("entries")).size());
+        assertEquals(scalar("SELECT COUNT(*) FROM students s JOIN classes c ON c.id=s.class WHERE COALESCE(s.active,1)=1 AND s.class<>0 AND c.grade=5"),((Number)result.get("totalParticipants")).longValue());
+        assertEquals(1,((Map<?,?>)((List<?>)result.get("entries")).get(0)).get("rank"));
+        assertThrows(CurriculumException.class,()->service.top50ForTutor(other,5));
     }
 
     @Test void flexibleDeletionIsPreviewedAuthorizedAndAtomicallyRemovesOnlyItsHistory() throws Exception {

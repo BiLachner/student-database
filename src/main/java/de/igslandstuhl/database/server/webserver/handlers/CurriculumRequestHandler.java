@@ -17,7 +17,7 @@ public final class CurriculumRequestHandler {
         for(String path:List.of("/curriculum-catalog","/curriculum-structure","/curriculum-budget","/curriculum-progress",
                 "/flexible-tasks","/add-flexible-task","/edit-flexible-task","/complete-flexible-task",
                 "/flexible-curriculum-structure","/add-flexible-topic","/rename-flexible-topic","/curriculum-releases","/set-curriculum-release",
-                "/curriculum-teacher-roster","/my-tutor-classes","/curriculum-learning-group-sheet","/curriculum-nansteine","/add-nanstein","/assign-nanstein","/complete-nanstein"))
+                "/curriculum-teacher-roster","/my-tutor-classes","/curriculum-learning-group-sheet","/curriculum-nansteine","/add-nanstein","/edit-nanstein","/nanstein-delete-preview","/delete-nanstein","/archive-nanstein","/assign-nanstein","/complete-nanstein","/ranking-top50"))
             HttpHandler.registerPostRequestHandler(path,AccessLevel.TEACHER,CurriculumRequestHandler::handle);
         for(String path:List.of("/rename-topic","/edit-task","/add-curriculum-topic","/add-curriculum-task",
                 "/central-curriculum-overview","/preview-central-curriculum-import","/import-central-curriculum",
@@ -294,6 +294,11 @@ public final class CurriculumRequestHandler {
                         ? service.nansteinStatus(actor,scope(rq,actor),integer(rq,"studentId"))
                         : service.nansteine(actor,scope(rq,actor));
                 case "/add-nanstein" -> result=service.createNanstein(actor,scope(rq,actor),name(rq),integer(rq,"tokens"));
+                case "/edit-nanstein" -> result=service.editNanstein(actor,integer(rq,"nansteinId"),name(rq),integer(rq,"tokens"));
+                case "/nanstein-delete-preview" -> result=service.nansteinDeletionPreview(actor,integer(rq,"nansteinId"));
+                case "/delete-nanstein" -> result=service.deleteNanstein(actor,integer(rq,"nansteinId"));
+                case "/archive-nanstein" -> { service.archiveNanstein(actor,integer(rq,"nansteinId")); result=Map.of("ok",true); }
+                case "/ranking-top50" -> result=service.top50ForTutor(actor,integer(rq,"grade"));
                 case "/assign-nanstein" -> {service.assignNanstein(actor,integer(rq,"nansteinId"),integer(rq,"studentId"));result=Map.of("ok",true);}
                 case "/complete-nanstein" -> {service.completeNanstein(actor,integer(rq,"nansteinId"),integer(rq,"studentId"));result=Map.of("ok",true);}
                 case "/assign-curriculum-context" -> {service.assign(actor,integer(rq,"studentId"),scope(rq,actor));result=Map.of("ok",true);}

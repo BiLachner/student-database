@@ -92,6 +92,13 @@
         "context": "html",
         "access_level": "user"
     },
+    "/hilfe": {
+        "type": "GET",
+        "handler_type": "TemplatingFileRequestHandler",
+        "namespaces": ["site"],
+        "context": "html",
+        "access_level": "user"
+    },
     "/partner_search": {
         "type": "GET",
         "handler_type":"TemplatingFileRequestHandler",

@@ -42,7 +42,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                 completion_history_conflict: 'Die Münzart oder maximale Münzzahl kann nicht geändert werden, weil für diese Etappe bereits Leistungen vorliegen.',
                 not_found: 'Der angefragte Eintrag wurde nicht gefunden.',
                 conflict: 'Die Änderung steht im Konflikt mit vorhandenen Daten. Bitte Kontext, Namen und Halbjahr prüfen und aktualisieren.',
-                budget_exceeded: 'Die Grenze von 105 Münzen würde überschritten.'
+                budget_exceeded: 'Die Grenze von 105 Münzen würde überschritten.',
+                nanstein_completion_protected: 'Abgeschlossene Nansteine bleiben mit ihren Abschlüssen und Münzgutschriften erhalten.',
+                nanstein_historical_protected: 'Nansteine abgeschlossener Halbjahre werden nicht gelöscht.',
+                nanstein_archive_unsupported: 'Nansteine werden über das Halbjahr archiviert; eine Einzelarchivierung ist nicht vorgesehen.'
                 ,topic_has_stages: 'Dieses Thema enthält noch Etappen. Lösche die Etappen zuerst einzeln oder lasse das Thema bestehen.'
             };
             const contexts = response.status === 409 && Array.isArray(body?.affectedContexts)
@@ -887,8 +890,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }catch(error){showError(error);}});
                 const nansteinSection=el('section'); nansteinSection.className='teacher-nanstein-editor'; nansteinSection.append(el('h4','Nansteine – individuelle Zusatzaufgaben'));
                 const nansteinForm=el('form'), nansteinName=field(nansteinForm,'Name der Zusatzaufgabe',''), nansteinTokens=field(nansteinForm,'Münzwert',1,'number'); button(nansteinForm,'Nanstein anlegen'); nansteinSection.append(nansteinForm);
-                const nansteinList=el('ul'); nansteinSection.append(nansteinList); central.append(nansteinSection);
-                const loadNansteine=async()=>{nansteinList.replaceChildren();try{const items=await post('/curriculum-nansteine',scope);for(const item of items)nansteinList.append(el('li',`${item.name} · ${item.tokens} Münzen`));}catch(error){nansteinList.append(el('li',`Nansteine konnten nicht geladen werden: ${error.message}`));}};
+                const nansteinList=el('ul'); nansteinList.setAttribute('aria-live','polite'); nansteinSection.append(nansteinList); central.append(nansteinSection);
+                const loadNansteine=async()=>{nansteinList.replaceChildren();try{const items=await post('/curriculum-nansteine',scope);for(const item of items){const row=el('li'),label=el('span',`${item.name} · ${item.tokens} Münzen `);row.append(label);const edit=el('button','Bearbeiten');edit.type='button';const remove=el('button','Löschen');remove.type='button';row.append(edit,remove);edit.addEventListener('click',async()=>{const nextName=window.prompt('Name des Nansteins',item.name);if(nextName==null)return;const nextTokens=window.prompt('Münzwert (1–105)',String(item.tokens));if(nextTokens==null)return;edit.disabled=remove.disabled=true;try{await post('/edit-nanstein',{nansteinId:item.id,name:nextName,tokens:Number(nextTokens)});await loadNansteine();}catch(error){showError(error);edit.disabled=remove.disabled=false;}});remove.addEventListener('click',async()=>{remove.disabled=true;try{const preview=await post('/nanstein-delete-preview',{nansteinId:item.id});if(!preview.canDelete){showError(Error(preview.completionCount>0?'Abgeschlossene Nansteine können nicht gelöscht werden.':'Nansteine abgeschlossener Halbjahre können nicht gelöscht werden.'));remove.disabled=false;return;}const count=Number(preview.assignmentCount)||0;const warning=count?`Der Nanstein ist ${count} Schüler:innen zugewiesen. Beim Löschen werden alle diese Zuweisungen gemeinsam entfernt. Fortfahren?`:`Nanstein „${item.name}“ löschen?`;if(!window.confirm(warning)){remove.disabled=false;return;}await post('/delete-nanstein',{nansteinId:item.id});await loadNansteine();}catch(error){showError(error);remove.disabled=false;}});nansteinList.append(row);}}catch(error){nansteinList.append(el('li',`Nansteine konnten nicht geladen werden: ${error.message}`));}};
                 nansteinForm.addEventListener('submit',async e=>{e.preventDefault();try{await post('/add-nanstein',{...scope,name:nansteinName.value,tokens:Number(nansteinTokens.value)});nansteinName.value='';await loadNansteine();}catch(error){showError(error);}}); await loadNansteine();
                 return;
             }

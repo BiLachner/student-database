@@ -436,6 +436,30 @@
         "namespaces": [],
         "access_level": "teacher"
     },
+    "/edit-nanstein": {
+        "type": "POST",
+        "handler_type": "PostRequestHandler",
+        "namespaces": [],
+        "access_level": "teacher"
+    },
+    "/nanstein-delete-preview": {
+        "type": "POST",
+        "handler_type": "PostRequestHandler",
+        "namespaces": [],
+        "access_level": "teacher"
+    },
+    "/delete-nanstein": {
+        "type": "POST",
+        "handler_type": "PostRequestHandler",
+        "namespaces": [],
+        "access_level": "teacher"
+    },
+    "/archive-nanstein": {
+        "type": "POST",
+        "handler_type": "PostRequestHandler",
+        "namespaces": [],
+        "access_level": "teacher"
+    },
     "/assign-nanstein": {
         "type": "POST",
         "handler_type": "PostRequestHandler",
@@ -443,6 +467,12 @@
         "access_level": "teacher"
     },
     "/complete-nanstein": {
+        "type": "POST",
+        "handler_type": "PostRequestHandler",
+        "namespaces": [],
+        "access_level": "teacher"
+    },
+    "/ranking-top50": {
         "type": "POST",
         "handler_type": "PostRequestHandler",
         "namespaces": [],
