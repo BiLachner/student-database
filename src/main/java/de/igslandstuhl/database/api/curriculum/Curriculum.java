@@ -168,7 +168,7 @@ public final class Curriculum {
                 Map<String,Object> unavailable = new LinkedHashMap<>();
                 unavailable.put("semesterId", semester); unavailable.put("totalValidCoins", 0L);
                 unavailable.put("rank", 0); unavailable.put("rankTotal", 0); unavailable.put("rankAvailable", false);
-                unavailable.put("inTopTen", false); unavailable.put("tieRule", "Gleiche Münzzahl erhält denselben Rang; Rang 10 zählt zur Top Ten.");
+                unavailable.put("inTopFifty", false); unavailable.put("tieRule", "Gleiche Münzzahl erhält denselben Rang; die Liste zeigt bis zu 50 Einträge.");
                 return unavailable;
             }
             int grade = integer(ownClass.get(0), "grade");
@@ -186,7 +186,7 @@ public final class Curriculum {
             result.put("rankAvailable", true);
             result.put("inTopTen", rank <= 10);
             result.put("inTopFifty", rank <= 50);
-            result.put("tieRule", "Gleiche Münzzahl erhält denselben Rang; alle mit Rang 10 gehören zur Top Ten.");
+            result.put("tieRule", "Gleiche Münzzahl erhält denselben Rang; die Liste zeigt bis zu 50 Einträge.");
             return result;
         });
     }
