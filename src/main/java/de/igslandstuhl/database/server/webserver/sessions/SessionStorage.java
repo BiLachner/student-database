@@ -11,38 +11,38 @@ import de.igslandstuhl.database.server.webserver.requests.HttpRequest;
 public class SessionStorage<T> {
     private final Map<Session, T> intern = new HashMap<>();
 
-    public T get(Session session) {
+    public synchronized T get(Session session) {
         return intern.get(session);
     }
-    public T get(HttpRequest request) {
+    public synchronized T get(HttpRequest request) {
         return intern.get(Server.getInstance().getWebServer().getSessionManager().getSession(request));
     }
-    public void set(Session session, T object) {
+    public synchronized void set(Session session, T object) {
         intern.put(session, object);
     }
-    public void set(HttpRequest request, T object) {
+    public synchronized void set(HttpRequest request, T object) {
         intern.put(Server.getInstance().getWebServer().getSessionManager().getSession(request), object);
     }
-    public void remove(Session session) {
+    public synchronized void remove(Session session) {
         intern.remove(session);
     }
-    public void remove(Session session, T value) {
+    public synchronized void remove(Session session, T value) {
         intern.remove(session,value);
     }
-    public void remove(T value) {
+    public synchronized void remove(T value) {
         intern.keySet().stream().filter((key) -> Objects.equals(intern.get(key), value))
         .toList().forEach((k) -> remove(k));
     }
-    public List<Session> getSessions(T value) {
+    public synchronized List<Session> getSessions(T value) {
         return intern.entrySet().stream()
             .filter(entry -> Objects.equals(entry.getValue(), value))
             .map(Map.Entry::getKey)
             .toList();
     }
-    public boolean contains(T value) {
+    public synchronized boolean contains(T value) {
         return intern.values().contains(value);
     }
-    public void clear() {
+    public synchronized void clear() {
         intern.clear();
     }
 }

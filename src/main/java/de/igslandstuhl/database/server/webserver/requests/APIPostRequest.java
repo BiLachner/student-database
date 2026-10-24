@@ -103,6 +103,14 @@ public class APIPostRequest extends PostRequest {
     }
     public static APIPostRequest fromPostRequest(PostRequest request) {
         if (request instanceof APIPostRequest rq) return rq;
+        else if (request.getHeader().getContentType() != null
+                && (request.getHeader().getContentType().toLowerCase().startsWith("multipart/")
+                    || request.getHeader().getContentType().toLowerCase().startsWith("application/pdf")))
+            return new APIPostRequest(request.getHeader(), request.getRawBody(), request.getIP(), request.isSecureConnection());
         else return new APIPostRequest(request.getHeader(), request.getBodyAsString(), request.getIP(), request.isSecureConnection());
+    }
+
+    public APIPostRequest(HttpHeader header, byte[] body, String ipAddress, boolean secureConnection) {
+        super(header, body, ipAddress, secureConnection);
     }
 }

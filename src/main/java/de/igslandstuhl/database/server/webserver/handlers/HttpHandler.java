@@ -33,8 +33,8 @@ public class HttpHandler<Rq extends HttpRequest> {
         if (contentLength <= 0 && !(request instanceof GetRequest)) {
             return HttpResponse.error(request, Status.BAD_REQUEST);
         }
-        if (!AccessManager.getInstance().hasAccess(
-                sessionManager.getSessionUser(request), path, request)) {
+        UserAccess access = new UserAccess(sessionManager.getSessionUser(request), request);
+        if (!access.allowed()) {
             var user = sessionManager.getSessionUser(request);
             return HttpResponse.error(request, user == null || user == de.igslandstuhl.database.api.User.ANONYMOUS
                     ? Status.UNAUTHORIZED : Status.FORBIDDEN);
@@ -48,6 +48,16 @@ public class HttpHandler<Rq extends HttpRequest> {
                 LOGGER.error("Failed to apply HTTP handler", t);
                 return HttpResponse.error(request, Status.INTERNAL_SERVER_ERROR);
             }
+        }
+    }
+
+    private final class UserAccess {
+        private final de.igslandstuhl.database.api.User user;
+        private final HttpRequest request;
+        UserAccess(de.igslandstuhl.database.api.User user, HttpRequest request) { this.user = user; this.request = request; }
+        boolean allowed() {
+            var webPath = Registry.webPathRegistry().get(de.igslandstuhl.database.server.webserver.WebPath.PathInfo.get(path, request.getRequestType()));
+            return webPath == null ? accessLevel.hasAccess(user) : AccessManager.getInstance().hasAccess(user, path, request);
         }
     }
 

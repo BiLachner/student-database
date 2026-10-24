@@ -30,6 +30,7 @@ public class PostRequest implements HttpRequest {
      * This is a map of key-value pairs extracted from the request body.
      */
     private final String body;
+    private final byte[] rawBody;
     /**
      * Represents the context of the POST request.
      * This is derived from the path, typically indicating the type of resource (e.g., "html", "json").
@@ -66,8 +67,17 @@ public class PostRequest implements HttpRequest {
      * @param body the body of the POST request
      */
     public PostRequest(HttpHeader header, String body, String ipAddress, boolean secureConnection) {
+        this(header, body, body == null ? new byte[0] : body.getBytes(StandardCharsets.UTF_8), ipAddress, secureConnection);
+    }
+
+    public PostRequest(HttpHeader header, byte[] rawBody, String ipAddress, boolean secureConnection) {
+        this(header, null, rawBody, ipAddress, secureConnection);
+    }
+
+    private PostRequest(HttpHeader header, String body, byte[] rawBody, String ipAddress, boolean secureConnection) {
         this.path = header.getPath();
         this.body = body != null ? body : "";
+        this.rawBody = rawBody == null ? new byte[0] : rawBody.clone();
         this.contentLength = header.getContentLength();
         this.cookies = header.getCookies();
         this.ipAddress = ipAddress;
@@ -118,6 +128,11 @@ public class PostRequest implements HttpRequest {
     }
     public HttpHeader getHeader() {
         return header;
+    }
+
+    /** Returns a defensive copy of the original request bytes. */
+    public byte[] getRawBody() {
+        return rawBody.clone();
     }
 
     public Map<String, String> getFormData() {

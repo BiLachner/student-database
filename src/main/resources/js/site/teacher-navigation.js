@@ -22,13 +22,7 @@
         link.href = tutorAreaPath;
         link.textContent = 'Tutorenbereich';
         item.append(link);
-        const attendanceLink = [...navigation.querySelectorAll('a[href]')]
-            .find(link => link.getAttribute('href') === '/attendance');
-        const schoolwide = [...navigation.querySelectorAll('a[href]')]
-            .find(link => link.getAttribute('href') === '/dashboard#schoolwide-stage-overview');
-        if (schoolwide?.closest('li')) schoolwide.closest('li').before(item);
-        else if (attendanceLink?.closest('li')) attendanceLink.closest('li').before(item);
-        else studentProgressLink.closest('li')?.after(item);
+        studentProgressLink.closest('li')?.after(item);
         return item;
     }
 
@@ -39,6 +33,16 @@
         if (!progress) return;
         const item = document.createElement('li');
         const link = document.createElement('a'); link.href = '/dashboard#schoolwide-stage-overview'; link.textContent = 'Gelingensnachweise';
+        item.append(link); progress.closest('li')?.after(item);
+    }
+
+    function freistellungItem(navigation) {
+        if ([...navigation.querySelectorAll('a[href]')].some(link => link.getAttribute('href') === '/freistellung')) return;
+        const progress = [...navigation.querySelectorAll('a[href]')]
+            .find(link => link.getAttribute('href') === '/dashboard#student-progress');
+        if (!progress) return;
+        const item = document.createElement('li');
+        const link = document.createElement('a'); link.href = '/freistellung'; link.textContent = 'Freistellung';
         item.append(link); progress.closest('li')?.after(item);
     }
 
@@ -137,7 +141,7 @@
         }
 
         const navigation = document.querySelector('.teacher-main-menu');
-        if (navigation) { integrateTeacherLogout(navigation); schoolwideOverviewItem(navigation); }
+        if (navigation) { integrateTeacherLogout(navigation); schoolwideOverviewItem(navigation); freistellungItem(navigation); }
 
         markActive();
 

@@ -249,8 +249,11 @@ public class PostResponse implements HttpResponse {
      * @return A PostResponse object representing the too many requests response.
      */
     public static PostResponse tooManyRequests(String message, PostRequest request) {
+        return tooManyRequests(message, request, 60);
+    }
+    public static PostResponse tooManyRequests(String message, PostRequest request, int retryAfterSeconds) {
         return new PostResponse(Status.TOO_MANY_REQUESTS, message, ContentType.TEXT_PLAIN, request,
-                new String[] {"Retry-After: 60"});
+                new String[] {"Retry-After: " + Math.max(1, retryAfterSeconds)});
     }
 
     /**

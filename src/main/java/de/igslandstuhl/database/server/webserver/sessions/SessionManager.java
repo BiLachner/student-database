@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.Objects;
+import java.util.function.LongSupplier;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,14 +18,18 @@ import de.igslandstuhl.database.server.webserver.requests.HttpRequest;
 
 public class SessionManager {
     private static final Logger LOGGER = LoggerFactory.getLogger(SessionManager.class);
-    private Map<UUID,Session> sessionStore = new HashMap<>();
+    private final Map<UUID,Session> sessionStore = new HashMap<>();
     /**
      * A map to store session IDs and their associated usernames.
      * This is a simple in-memory session store.
      */
     private SessionStorage<String> sessionUsers = new SessionStorage<>();
     private SessionStorage<Instant> lastActivity = new SessionStorage<>();
+    /** Legacy diagnostic counter; it mirrors accepted requests in the current window. */
     private SessionStorage<Integer> requestCount = new SessionStorage<>();
+    private final Map<Session,RateWindow> apiRateWindows = new HashMap<>();
+    private final Map<Session,RateWindow> loginRateWindows = new HashMap<>();
+    private final Object rateLock = new Object();
 
     /**
      * After this duration, sessions expire (are removed from the session store). It is measured in seconds.
@@ -33,6 +38,12 @@ public class SessionManager {
     private final int maximumInactivityDuration;
     private final int anonymousMaxRequests;
     private final int authenticatedMaxRequests;
+    private final int loginMaxRequests;
+    private final long rateWindowMillis;
+    private final LongSupplier clockMillis;
+
+    public static final long DEFAULT_RATE_WINDOW_SECONDS = 60;
+    public static final int DEFAULT_LOGIN_MAX_REQUESTS = 10;
 
 
 
@@ -42,10 +53,25 @@ public class SessionManager {
 
     public SessionManager(int sessionExpireDuration, int maximumInactivityDuration,
                           int anonymousMaxRequests, int authenticatedMaxRequests) {
+        this(sessionExpireDuration, maximumInactivityDuration, anonymousMaxRequests,
+                authenticatedMaxRequests, Math.min(anonymousMaxRequests, DEFAULT_LOGIN_MAX_REQUESTS),
+                DEFAULT_RATE_WINDOW_SECONDS, System::currentTimeMillis);
+    }
+
+    /** Testable constructor; production uses the one-minute fixed window. */
+    public SessionManager(int sessionExpireDuration, int maximumInactivityDuration,
+                          int anonymousMaxRequests, int authenticatedMaxRequests,
+                          int loginMaxRequests, long rateWindowSeconds,
+                          LongSupplier clockMillis) {
         this.sessionExpireDuration = sessionExpireDuration;
         this.maximumInactivityDuration = maximumInactivityDuration;
         this.anonymousMaxRequests = anonymousMaxRequests;
         this.authenticatedMaxRequests = authenticatedMaxRequests;
+        if (loginMaxRequests < 1 || rateWindowSeconds < 1 || clockMillis == null)
+            throw new IllegalArgumentException("Invalid rate-limit configuration");
+        this.loginMaxRequests = loginMaxRequests;
+        this.rateWindowMillis = Math.multiplyExact(rateWindowSeconds, 1000L);
+        this.clockMillis = clockMillis;
         LOGGER.debug("Starting session cleanup job...");
         new Thread(this::cleanSecondsJob, "Session Expiring").start();
     }
@@ -60,6 +86,10 @@ public class SessionManager {
         }
         lastActivity.remove(session);
         requestCount.remove(session);
+        synchronized (rateLock) {
+            apiRateWindows.remove(session);
+            loginRateWindows.remove(session);
+        }
     }
     private Instant getOrCreateLastActivity(Session session) {
         Instant instant = lastActivity.get(session);
@@ -67,16 +97,22 @@ public class SessionManager {
     }
     private void cleanSecondsJob() {
         while (true) {
-            sessionStore.values().stream()
+            List<Session> sessions;
+            synchronized (sessionStore) { sessions = List.copyOf(sessionStore.values()); }
+            sessions.stream()
             .filter((session) -> 
                 session.getLoginTime().plusSeconds(sessionExpireDuration).isBefore(Instant.now())
                 || getOrCreateLastActivity(session).plusSeconds(maximumInactivityDuration).isBefore(Instant.now())
             )
             .toList().stream() // Convert to list to avoid ConcurrentModificationException
             .forEach(this::removeSession);
-            requestCount.clear();
+            long now=clockMillis.getAsLong();
+            synchronized (rateLock) {
+                apiRateWindows.entrySet().removeIf(entry -> now-entry.getValue().startedAtMillis() >= rateWindowMillis);
+                loginRateWindows.entrySet().removeIf(entry -> now-entry.getValue().startedAtMillis() >= rateWindowMillis);
+            }
             try {
-                Thread.sleep(60000);
+                Thread.sleep(5000);
             } catch (InterruptedException e) {
                 LOGGER.warn("Session manager cleanup job interrupted while sleeping", e);
             }
@@ -85,32 +121,67 @@ public class SessionManager {
 
     public SessionValidationResult validateSession(HttpRequest request) {
         Session session=getSession(request);
-        lastActivity.set(session, Instant.now());
-
-        Integer requests = requestCount.get(session);
-        int count = requests == null ? 0 : requests;
-        count++;
-        requestCount.set(session, count);
-        User user = getSessionUser(request);
-        int maxRequests = user == User.ANONYMOUS ? anonymousMaxRequests : authenticatedMaxRequests;
-        if (count > maxRequests && !user.isAdmin()) {
-            LOGGER.warn("Needed to put {} under rate limit: {} requests of maximum {} allowed", user.getUsername(), count, maxRequests);
-            return SessionValidationResult.RATE_LIMITED;
-        }
-
         String userAgent = request.getUserAgent();
-        if (!Objects.equals(getSession(request).getUserAgent(), userAgent)) {
+        if (!Objects.equals(session.getUserAgent(), userAgent)) {
             LOGGER.warn("faked session id (device changed), for user {}" + getSessionUser(request));
             return SessionValidationResult.INVALID_SESSION;
         }
         String ip = request.getIP();
-        if (!Objects.equals(getSession(request).getIpAddress(), ip)) {
+        if (!Objects.equals(session.getIpAddress(), ip)) {
             LOGGER.warn("faked session id (ip address changed) for user {}" + getSessionUser(request));
             return SessionValidationResult.INVALID_SESSION;
         }
 
+        User user = getSessionUser(session);
+        lastActivity.set(session, Instant.now());
+        boolean loginRequest = "/login".equals(request.getPath().split("\\?", 2)[0]);
+        if (!user.isAdmin() || loginRequest) {
+            int maxRequests = loginRequest ? loginMaxRequests
+                    : (user == User.ANONYMOUS ? anonymousMaxRequests : authenticatedMaxRequests);
+            RateDecision decision = consume(session, loginRequest, maxRequests);
+            requestCount.set(session, decision.count());
+            if (!decision.allowed()) {
+                LOGGER.warn("Rate limit for {}: {} requests of maximum {} allowed", user.getUsername(), decision.count(), maxRequests);
+                return SessionValidationResult.RATE_LIMITED;
+            }
+        }
+
         return SessionValidationResult.OK;
     }
+
+    private RateDecision consume(Session session, boolean login, int limit) {
+        long now=clockMillis.getAsLong();
+        synchronized (rateLock) {
+            Map<Session,RateWindow> windows=login ? loginRateWindows : apiRateWindows;
+            RateWindow current=windows.get(session);
+            if (current==null || now-current.startedAtMillis() >= rateWindowMillis) {
+                current=new RateWindow(now,0); windows.put(session,current);
+            }
+            if (current.count() >= limit)
+                return new RateDecision(false,current.count(),retryAfterSeconds(current,now));
+            RateWindow accepted=new RateWindow(current.startedAtMillis(),current.count()+1);
+            windows.put(session,accepted);
+            return new RateDecision(true,accepted.count(),retryAfterSeconds(accepted,now));
+        }
+    }
+
+    public int retryAfterSeconds(HttpRequest request) {
+        Session session=getSession(request);
+        boolean loginRequest="/login".equals(request.getPath().split("\\?", 2)[0]);
+        long now=clockMillis.getAsLong();
+        synchronized (rateLock) {
+            RateWindow window=(loginRequest ? loginRateWindows : apiRateWindows).get(session);
+            return window==null ? 1 : retryAfterSeconds(window,now);
+        }
+    }
+
+    private int retryAfterSeconds(RateWindow window,long now) {
+        long remaining=Math.max(1,window.startedAtMillis()+rateWindowMillis-now);
+        return (int)Math.min(Integer.MAX_VALUE,(remaining+999)/1000);
+    }
+
+    private record RateWindow(long startedAtMillis,int count) {}
+    private record RateDecision(boolean allowed,int count,int retryAfterSeconds) {}
 
     /**
      * Logs out the user that supplied this request. This removes the session.
@@ -130,7 +201,7 @@ public class SessionManager {
     }
 
     public Session getSession(UUID sessionUUID) {
-        return sessionStore.get(sessionUUID);
+        synchronized (sessionStore) { return sessionStore.get(sessionUUID); }
     }
     public Session getSession(HttpRequest request) {
         // Search for cookie header
@@ -146,9 +217,11 @@ public class SessionManager {
             }
         }
         // Session does not exist yet
-        Session session = new Session(request);
-        sessionStore.put(session.getUUID(), session);
-        return session;
+        synchronized (sessionStore) {
+            Session session = new Session(request);
+            sessionStore.put(session.getUUID(), session);
+            return session;
+        }
     }
     public User getSessionUser(Session session) {
         synchronized (sessionUsers) {

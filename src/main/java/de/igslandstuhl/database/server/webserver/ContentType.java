@@ -13,7 +13,8 @@ public enum ContentType {
     PNG ("image/png"),
     WEBP ("image/webp"),
     JSON ("text/json"),
-    CSV ("text/csv")
+    CSV ("text/csv"),
+    PDF ("application/pdf")
     ;
     /**
      * The name of the content type, used in HTTP headers.
@@ -40,6 +41,7 @@ public enum ContentType {
             case JAVASCRIPT:
             case CSS:
             case JSON:
+            case CSV:
                 return true;
             default:
                 return false;

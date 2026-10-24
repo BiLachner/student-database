@@ -853,6 +853,15 @@ main.attendance .attendance-class-picker-panel:empty::before { content:'Keine Kl
 .teacher-nanstein-row > span { flex:1 1 16rem; }
 .teacher-nanstein-state { color:#17324d; }
 .teacher-nanstein-row button { margin:0; }
+.teacher-nanstein-editor li { display:flex; flex-wrap:wrap; align-items:center; gap:.45rem; margin:.45rem 0; }
+.teacher-nanstein-editor li span { flex:1 1 18rem; }
+.teacher-top50-dialog { width:min(52rem,calc(100vw - 2rem)); max-height:calc(100vh - 2rem); border:1px solid #b9c7d6; border-radius:.6rem; padding:1rem; }
+.teacher-top50-dialog::backdrop { background:rgb(10 30 50 / .55); }
+.teacher-top50-scroll { max-height:60vh; overflow:auto; border:1px solid #d9e1ea; }
+.teacher-top50-table { width:100%; border-collapse:collapse; }
+.teacher-top50-table th, .teacher-top50-table td { padding:.45rem .55rem; border-bottom:1px solid #e4e9ef; text-align:left; }
+.teacher-top50-table th:first-child, .teacher-top50-table td:first-child, .teacher-top50-table th:last-child, .teacher-top50-table td:last-child { text-align:right; }
+@media (max-width: 600px) { .teacher-top50-dialog { padding:.75rem; } .teacher-top50-table th, .teacher-top50-table td { padding:.35rem .4rem; } }
 @media print {
     @page { size:A4 landscape; margin:10mm; }
     body:has(.printing-learning-sheet) > #dashboard { display:block !important; }

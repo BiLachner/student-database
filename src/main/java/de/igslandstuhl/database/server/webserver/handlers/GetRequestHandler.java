@@ -35,7 +35,7 @@ public class GetRequestHandler {
         SessionValidationResult v = sessionManager.validateSession(request);
         if(v != SessionValidationResult.OK){
             return switch (v){
-                case RATE_LIMITED -> GetResponse.tooManyRequests(request);
+                case RATE_LIMITED -> GetResponse.tooManyRequests("Too Many Requests", request, sessionManager.retryAfterSeconds(request));
                 case INVALID_SESSION -> GetResponse.unauthorized("Invalid Session", request);
                 default -> GetResponse.unauthorized("Invalid Session", request);
             };
@@ -74,7 +74,6 @@ public class GetRequestHandler {
 
     public final void registerHandlers() {
         LOGGER.info("Registering Get Request Handlers...");
-        if (Registry.getRequestHandlerRegistry().stream().count() > 0) return; // already registered
         List<WebPath.PathInfo> getPaths = Registry.webPathRegistry().keyStream().filter((p) -> p.type().equals(RequestType.GET)).toList();
         for (WebPath.PathInfo pathInfo : getPaths) {
             WebPath webPath = Registry.webPathRegistry().get(pathInfo);

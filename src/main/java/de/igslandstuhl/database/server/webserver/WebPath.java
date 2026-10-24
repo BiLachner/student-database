@@ -37,7 +37,6 @@ public record WebPath(RequestType type, String handlerType, List<String> namespa
     }
     public static void registerPaths() throws IOException {
         LOGGER.info("Registering get request paths...");
-        if (Registry.webPathRegistry().stream().count() > 0) return; // already registered
         ResourceLocation getPathLocation = new ResourceLocation("meta", "paths", "get_paths.json");
         registerPaths(getPathLocation);
         ResourceLocation postPathLocation = new ResourceLocation("meta", "paths", "post_paths.json");

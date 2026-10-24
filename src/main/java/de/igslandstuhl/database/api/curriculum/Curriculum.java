@@ -172,21 +172,7 @@ public final class Curriculum {
                 return unavailable;
             }
             int grade = integer(ownClass.get(0), "grade");
-            List<Map<String,Object>> rows = rows(c,
-                    "SELECT s.id, "
-                    + "COALESCE((SELECT SUM(t.tokens) FROM taskstats x JOIN tasks t ON t.id=x.task "
-                    + "JOIN topics p ON p.id=t.topic WHERE x.student=s.id AND x.status=2 AND p.semester=? "
-                    + "AND EXISTS (SELECT 1 FROM student_curriculum_contexts ctx WHERE ctx.student=s.id "
-                    + "AND ctx.subject=p.subject AND ctx.semester=p.semester AND (ctx.class=s.class OR ctx.class IS NULL))),0) "
-                    + "+ COALESCE((SELECT SUM(COALESCE(x.awarded_tokens,t.tokens)) FROM completed_flexible_tasks x JOIN flexible_tasks t ON t.id=x.flexible_task "
-                    + "WHERE x.student=s.id AND t.semester=? AND EXISTS (SELECT 1 FROM student_curriculum_contexts ctx "
-                    + "WHERE ctx.student=s.id AND ctx.subject=t.subject AND ctx.semester=t.semester "
-                    + "AND (ctx.course_group=t.course_group OR (t.course_group IS NULL AND ctx.class=t.class)))),0) "
-                    + "+ COALESCE((SELECT SUM(n.tokens) FROM curriculum_nanstein_completions x JOIN curriculum_nansteine n ON n.id=x.nanstein "
-                    + "WHERE x.student=s.id AND n.semester=? AND EXISTS (SELECT 1 FROM student_curriculum_contexts ctx "
-                    + "WHERE ctx.student=s.id AND ctx.subject=n.subject AND ctx.semester=n.semester "
-                    + "AND ((n.course_group IS NOT NULL AND ctx.course_group=n.course_group) OR (n.course_group IS NULL AND ctx.class=n.class)))),0) AS totalCoins "
-                    + "FROM students s JOIN classes cl ON cl.id=s.class WHERE COALESCE(s.active,1)=1 AND s.class<>0 AND cl.grade=?", semester, semester, semester, grade);
+            List<Map<String,Object>> rows = rankingEntries(c, semester, grade);
             Map<Integer,Long> totalsByStudent = new HashMap<>();
             for (Map<String,Object> row : rows) totalsByStudent.put(integer(row,"id"), ((Number) row.get("totalCoins")).longValue());
             long ownTotal = totalsByStudent.getOrDefault(studentId, 0L);
@@ -199,7 +185,67 @@ public final class Curriculum {
             result.put("grade", grade);
             result.put("rankAvailable", true);
             result.put("inTopTen", rank <= 10);
+            result.put("inTopFifty", rank <= 50);
             result.put("tieRule", "Gleiche Münzzahl erhält denselben Rang; alle mit Rang 10 gehören zur Top Ten.");
+            return result;
+        });
+    }
+
+    /** Shared current-semester ranking calculation for student and tutor views. */
+    private static List<Map<String,Object>> rankingEntries(Connection c, int semester, int grade) throws SQLException {
+        List<Map<String,Object>> result = rows(c,
+                "SELECT s.id,s.class AS classId,s.first_name AS firstName,s.last_name AS lastName,cl.label AS classLabel, "
+                + "COALESCE((SELECT SUM(t.tokens) FROM taskstats x JOIN tasks t ON t.id=x.task "
+                + "JOIN topics p ON p.id=t.topic WHERE x.student=s.id AND x.status=2 AND p.semester=? "
+                + "AND EXISTS (SELECT 1 FROM student_curriculum_contexts ctx WHERE ctx.student=s.id "
+                + "AND ctx.subject=p.subject AND ctx.semester=p.semester AND (ctx.class=s.class OR ctx.class IS NULL))),0) "
+                + "+ COALESCE((SELECT SUM(COALESCE(x.awarded_tokens,t.tokens)) FROM completed_flexible_tasks x JOIN flexible_tasks t ON t.id=x.flexible_task "
+                + "WHERE x.student=s.id AND t.semester=? AND EXISTS (SELECT 1 FROM student_curriculum_contexts ctx "
+                + "WHERE ctx.student=s.id AND ctx.subject=t.subject AND ctx.semester=t.semester "
+                + "AND (ctx.course_group=t.course_group OR (t.course_group IS NULL AND ctx.class=t.class)))),0) "
+                + "+ COALESCE((SELECT SUM(n.tokens) FROM curriculum_nanstein_completions x JOIN curriculum_nansteine n ON n.id=x.nanstein "
+                + "WHERE x.student=s.id AND n.semester=? AND EXISTS (SELECT 1 FROM student_curriculum_contexts ctx "
+                + "WHERE ctx.student=s.id AND ctx.subject=n.subject AND ctx.semester=n.semester "
+                + "AND ((n.course_group IS NOT NULL AND ctx.course_group=n.course_group) OR (n.course_group IS NULL AND ctx.class=n.class)))),0) AS totalCoins "
+                + "FROM students s JOIN classes cl ON cl.id=s.class WHERE COALESCE(s.active,1)=1 AND s.class<>0 AND cl.grade=?", semester, semester, semester, grade);
+        result.sort(Comparator.comparingLong((Map<String,Object> row) -> -((Number) row.get("totalCoins")).longValue())
+                .thenComparing(row -> String.valueOf(row.get("lastName")), String.CASE_INSENSITIVE_ORDER)
+                .thenComparing(row -> String.valueOf(row.get("firstName")), String.CASE_INSENSITIVE_ORDER)
+                .thenComparing(row -> integer(row,"id")));
+        long previous = Long.MIN_VALUE; int rank = 0;
+        for (int i=0; i<result.size(); i++) {
+            long total = ((Number) result.get(i).get("totalCoins")).longValue();
+            if (total != previous) rank = i + 1;
+            result.get(i).put("rank", rank);
+            previous = total;
+        }
+        return result;
+    }
+
+    /** Top-50 list for a tutor's current grade; names are only exposed to an authorized tutor. */
+    public Map<String,Object> top50ForTutor(Actor actor, int grade) throws SQLException {
+        if (actor == null || actor.admin() || actor.teacherId() < 1)
+            throw error(403,"forbidden","Teacher tutor session required.");
+        return transaction(c -> {
+            int semester = currentSemester(c);
+            if (number(c,"SELECT COUNT(*) FROM curriculum_class_tutors ct JOIN classes cl ON cl.id=ct.class "
+                    + "WHERE ct.semester=? AND ct.teacher=? AND cl.grade=?", semester, actor.teacherId(), grade) == 0)
+                throw error(403,"forbidden","Teacher is not a tutor for this grade.");
+            Set<Integer> visibleClasses = new HashSet<>();
+            for (var row : rows(c,"SELECT class FROM curriculum_class_tutors WHERE semester=? AND teacher=?",semester,actor.teacherId()))
+                visibleClasses.add(integer(row,"class"));
+            List<Map<String,Object>> allEntries = rankingEntries(c, semester, grade);
+            List<Map<String,Object>> entries = allEntries.size() > 50 ? new ArrayList<>(allEntries.subList(0,50)) : allEntries;
+            for (var entry : entries) {
+                if (!visibleClasses.contains(integer(entry,"classId"))) {
+                    entry.put("firstName","Teilnehmer:in"); entry.put("lastName",""); entry.put("classLabel","Jahrgang "+grade);
+                }
+                entry.remove("classId");
+            }
+            Map<String,Object> result = new LinkedHashMap<>();
+            result.put("semesterId", semester); result.put("grade", grade);
+            result.put("entries", entries); result.put("totalParticipants", allEntries.size());
+            result.put("tieRule", "Gleiche Münzzahl erhält denselben Rang; die Liste zeigt bis zu 50 Einträge.");
             return result;
         });
     }
@@ -643,6 +689,53 @@ public final class Curriculum {
         return transaction(c->{int grade=authorize(c,actor,scope,true); Integer group=individualSubject(c,scope.subjectId())?resolveScope(c,scope).courseGroupId():null;
             write(c,"INSERT INTO curriculum_nansteine(owner_teacher,subject,class,semester,grade,course_group,name,tokens) VALUES(?,?,?,?,?,?,?,?)",scope.teacherId(),scope.subjectId(),scope.classId(),scope.semesterId(),grade,group,value,tokenValue);
             return nanstein(require(c,"SELECT * FROM curriculum_nansteine WHERE id=last_insert_rowid()"));});
+    }
+
+    public Nanstein editNanstein(Actor actor, int nansteinId, String name, int tokenValue) throws SQLException {
+        String value=validName(name); if(tokenValue<1 || tokenValue>HARD_LIMIT) throw error(400,"invalid_input","Nanstein-Münzen müssen zwischen 1 und 105 liegen.");
+        return transaction(c->{
+            var old=require(c,"SELECT * FROM curriculum_nansteine WHERE id=?",nansteinId);
+            authorize(c,actor,new Scope(integer(old,"owner_teacher"),integer(old,"subject"),integer(old,"class"),integer(old,"semester"),old.get("course_group")==null?null:integer(old,"course_group")),false);
+            long completions=number(c,"SELECT COUNT(*) FROM curriculum_nanstein_completions WHERE nanstein=?",nansteinId);
+            if(completions>0 && tokenValue!=integer(old,"tokens")) throw error(409,"nanstein_completion_protected","Bereits gutgeschriebene Münzen dürfen nicht nachträglich verändert werden.");
+            write(c,"UPDATE curriculum_nansteine SET name=?,tokens=? WHERE id=?",value,tokenValue,nansteinId);
+            return nanstein(require(c,"SELECT * FROM curriculum_nansteine WHERE id=?",nansteinId));
+        });
+    }
+
+    public Map<String,Object> nansteinDeletionPreview(Actor actor, int nansteinId) throws SQLException {
+        return transaction(c->{
+            var n=require(c,"SELECT * FROM curriculum_nansteine WHERE id=?",nansteinId);
+            authorize(c,actor,new Scope(integer(n,"owner_teacher"),integer(n,"subject"),integer(n,"class"),integer(n,"semester"),n.get("course_group")==null?null:integer(n,"course_group")),false);
+            long assignments=number(c,"SELECT COUNT(*) FROM curriculum_nanstein_assignments WHERE nanstein=?",nansteinId);
+            long completions=number(c,"SELECT COUNT(*) FROM curriculum_nanstein_completions WHERE nanstein=?",nansteinId);
+            boolean current=integer(n,"semester")==currentSemester(c);
+            return Map.of("nansteinId",nansteinId,"name",n.get("name"),"assignmentCount",assignments,"completionCount",completions,"currentSemester",current,"canDelete",current&&completions==0);
+        });
+    }
+
+    public Map<String,Object> deleteNanstein(Actor actor, int nansteinId) throws SQLException {
+        return transaction(c->{
+            var n=require(c,"SELECT * FROM curriculum_nansteine WHERE id=?",nansteinId);
+            authorize(c,actor,new Scope(integer(n,"owner_teacher"),integer(n,"subject"),integer(n,"class"),integer(n,"semester"),n.get("course_group")==null?null:integer(n,"course_group")),false);
+            long completions=number(c,"SELECT COUNT(*) FROM curriculum_nanstein_completions WHERE nanstein=?",nansteinId);
+            if(completions>0) throw error(409,"nanstein_completion_protected","Nansteine mit erfolgreichem Abschluss bleiben erhalten; Münzgutschriften und Abschlüsse dürfen nicht gelöscht werden.");
+            if(integer(n,"semester")!=currentSemester(c)) throw error(409,"nanstein_historical_protected","Nansteine abgeschlossener Halbjahre werden nicht gelöscht.");
+            long assignments=number(c,"SELECT COUNT(*) FROM curriculum_nanstein_assignments WHERE nanstein=?",nansteinId);
+            write(c,"DELETE FROM curriculum_nanstein_assignments WHERE nanstein=?",nansteinId);
+            write(c,"DELETE FROM curriculum_nansteine WHERE id=?",nansteinId);
+            return Map.of("deleted",true,"assignmentCount",assignments);
+        });
+    }
+
+    public void archiveNanstein(Actor actor, int nansteinId) throws SQLException {
+        transaction(c->{
+            var n=require(c,"SELECT * FROM curriculum_nansteine WHERE id=?",nansteinId);
+            authorize(c,actor,new Scope(integer(n,"owner_teacher"),integer(n,"subject"),integer(n,"class"),integer(n,"semester"),n.get("course_group")==null?null:integer(n,"course_group")),false);
+            if(number(c,"SELECT COUNT(*) FROM curriculum_nanstein_completions WHERE nanstein=?",nansteinId)>0)
+                throw error(409,"nanstein_completion_protected","Abgeschlossene Nansteine dürfen nicht archiviert werden.");
+            throw error(409,"nanstein_archive_unsupported","Nansteine werden über das Halbjahr archiviert; eine Einzelarchivierung ist nicht vorgesehen.");
+        });
     }
     public int assignNanstein(Actor actor,int nansteinId,int studentId) throws SQLException {
         if(actor==null || actor.admin()) throw error(403,"forbidden","Eine Lehrkraft ist für die Nanstein-Zuweisung erforderlich.");
