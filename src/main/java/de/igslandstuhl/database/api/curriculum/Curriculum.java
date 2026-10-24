@@ -172,7 +172,7 @@ public final class Curriculum {
             if (ownClass.isEmpty()) {
                 Map<String,Object> unavailable = new LinkedHashMap<>();
                 unavailable.put("semesterId", semester); unavailable.put("totalValidCoins", 0L);
-                unavailable.put("rank", null); unavailable.put("rankTotal", 0); unavailable.put("rankAvailable", false);
+                unavailable.put("rank", null); unavailable.put("rankLimit", 50); unavailable.put("rankAvailable", false);
                 unavailable.put("inTopFifty", false); unavailable.put("tieRule", "Gleiche Münzzahl erhält denselben Rang; die Liste zeigt bis zu 50 Einträge.");
                 return unavailable;
             }
@@ -186,7 +186,9 @@ public final class Curriculum {
             result.put("semesterId", semester);
             result.put("totalValidCoins", ownTotal);
             result.put("rank", studentVisibleRank(rank));
-            result.put("rankTotal", totalsByStudent.size());
+            // The student contract deliberately exposes only the competition limit,
+            // never the size of the complete ranking population.
+            result.put("rankLimit", 50);
             result.put("grade", grade);
             result.put("rankAvailable", true);
             result.put("inTopTen", rank <= 10);
@@ -238,13 +240,7 @@ public final class Curriculum {
                 throw error(403,"forbidden","Teacher is not a tutor for this grade.");
             List<Map<String,Object>> allEntries = rankingEntries(c, semester, grade);
             List<Map<String,Object>> entries = allEntries.size() > 50 ? new ArrayList<>(allEntries.subList(0,50)) : allEntries;
-            Set<Integer> visibleClasses = new HashSet<>();
-            for (var row : rows(c,"SELECT class FROM curriculum_class_tutors WHERE semester=? AND teacher=?",semester,actor.teacherId()))
-                visibleClasses.add(integer(row,"class"));
             for (var entry : entries) {
-                if (!visibleClasses.contains(integer(entry,"classId"))) {
-                    entry.put("firstName","Teilnehmer:in"); entry.put("lastName","");
-                }
                 entry.remove("classId");
             }
             Map<String,Object> result = new LinkedHashMap<>();

@@ -26,6 +26,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         const top50Button = el('button', 'Top 50 anzeigen'); top50Button.type = 'button'; top50Button.className = 'teacher-top50-button'; controls.append(top50Button);
         const status = el('p'); status.setAttribute('role','status'); const output = el('div');
         panel.append(controls, status, output); mount.append(panel);
+        const markPrintState = () => panel.classList.add('teacher-weekly-printing');
+        const clearPrintState = () => panel.classList.remove('teacher-weekly-printing');
+        window.addEventListener('beforeprint', markPrintState);
+        window.addEventListener('afterprint', clearPrintState);
         const top50Dialog = document.createElement('dialog'); top50Dialog.className = 'teacher-top50-dialog';
         const top50Title = el('h3', 'Top 50 anzeigen'); top50Title.id = 'teacher-top50-title';
         const top50Status = el('p'); top50Status.setAttribute('role','status');

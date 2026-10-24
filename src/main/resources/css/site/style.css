@@ -810,6 +810,8 @@ main.attendance .attendance-class-picker-panel:empty::before { content:'Keine Kl
   .teacher-function-page { border:0; box-shadow:none; margin:0; padding:0; }
   .teacher-weekly-conversations { border:0; margin:0; padding:0; }
   .teacher-table-scroll { overflow:visible; max-height:none; border:0; }
+  .teacher-weekly-conversations .teacher-weekly-scroll,
+  .teacher-weekly-conversations.teacher-weekly-printing .teacher-weekly-scroll { height:auto !important; max-height:none !important; overflow:visible !important; overscroll-behavior:auto; }
   .teacher-weekly-conversations .teacher-weekly-table { width:100%; min-width:0; table-layout:fixed; page-break-inside:auto; }
   .teacher-weekly-conversations .teacher-weekly-table th,
   .teacher-weekly-conversations .teacher-weekly-table td { min-width:0 !important; width:auto; padding:2pt 2.5pt; font-size:7pt; line-height:1.15; overflow-wrap:anywhere; word-break:break-word; }

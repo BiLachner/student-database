@@ -72,4 +72,24 @@ test('tutor print CSS targets complete A4 landscape width without screen scrolli
   assert.match(css,/\.teacher-weekly-conversations \.teacher-weekly-table th:first-child,[\s\S]*?width:16%;/);
   assert.match(css,/\.teacher-table-scroll \{ overflow:visible; max-height:none;/);
   assert.match(css,/thead \{ display:table-header-group; \}/);
+  assert.match(css,/\.teacher-weekly-conversations \.teacher-weekly-scroll,[\s\S]*?height:auto !important; max-height:none !important; overflow:visible !important;/);
+});
+
+test('print state keeps all 97 already-loaded students in the print DOM',async()=>{
+  const students=Array.from({length:97},(_,index)=>({name:`Student ${index+1}`,subjects:[]}));
+  const instance=dom({classes:[{semesterId:4,classId:7,label:'7a',grade:7}],overview:{semesterLabel:'2026/27 HJ1',classLabel:'7a',subjects:[{id:3,name:'Mathe'},{id:21,name:'WPF Technik'}],students}});
+  await new Promise(resolve=>setTimeout(resolve,30));
+  const panel=instance.window.document.querySelector('.teacher-weekly-conversations');
+  const table=panel.querySelector('.teacher-weekly-table');
+  assert.equal(table.querySelectorAll('tbody tr').length,97);
+  assert.match(table.querySelector('tbody tr:first-child').textContent,/Student 1/);
+  assert.match(table.querySelectorAll('tbody tr')[48].textContent,/Student 49/);
+  assert.match(table.querySelector('tbody tr:last-child').textContent,/Student 97/);
+  assert.equal(new Set([...table.querySelectorAll('tbody tr')].map(row=>row.firstElementChild.textContent)).size,97);
+  instance.window.dispatchEvent(new instance.window.Event('beforeprint'));
+  assert.equal(panel.classList.contains('teacher-weekly-printing'),true);
+  assert.equal(table.querySelectorAll('tbody tr').length,97);
+  instance.window.dispatchEvent(new instance.window.Event('afterprint'));
+  assert.equal(panel.classList.contains('teacher-weekly-printing'),false);
+  instance.window.close();
 });

@@ -758,7 +758,7 @@ public class Student extends User {
         Map<String,Object> ranking = new java.util.LinkedHashMap<>();
         ranking.put("totalValidCoins", 0L);
         ranking.put("rank", null);
-        ranking.put("rankTotal", 0);
+        ranking.put("rankLimit", 50);
         ranking.put("rankAvailable", false);
         ranking.put("inTopTen", false);
         ranking.put("inTopFifty", false);
@@ -778,7 +778,7 @@ public class Student extends User {
         .append("\"active\": ").append(active).append(",\n")
         .append("\"totalValidCoins\": ").append(ranking.getOrDefault("totalValidCoins", 0)).append(",\n")
         .append("\"ranking\": {\"rank\": ").append(ranking.getOrDefault("rank", 0))
-        .append(", \"rankTotal\": ").append(ranking.getOrDefault("rankTotal", 0))
+        .append(", \"rankLimit\": ").append(ranking.getOrDefault("rankLimit", 50))
         .append(", \"rankAvailable\": ").append(ranking.getOrDefault("rankAvailable", false))
         .append(", \"inTopTen\": ").append(ranking.getOrDefault("inTopTen", false))
         .append(", \"inTopFifty\": ").append(ranking.getOrDefault("inTopFifty", false)).append("},\n")
