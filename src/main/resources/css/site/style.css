@@ -805,11 +805,16 @@ main.attendance .attendance-class-picker-panel label { display:flex; align-items
 main.attendance .attendance-class-picker-panel label:hover { background:#eaf3fb; }
 main.attendance .attendance-class-picker-panel:empty::before { content:'Keine Klassen geladen.'; grid-column:1 / -1; color:#526b82; }
 @media print {
+  @page { size: A4 landscape; margin: 8mm; }
   .teacher-main-menu, .teacher-weekly-conversations .teacher-filter-bar, button, nav { display:none !important; }
   .teacher-function-page { border:0; box-shadow:none; margin:0; padding:0; }
   .teacher-weekly-conversations { border:0; margin:0; padding:0; }
   .teacher-table-scroll { overflow:visible; max-height:none; border:0; }
-  .teacher-weekly-conversations .teacher-weekly-table { width:100%; min-width:0; page-break-inside:auto; }
+  .teacher-weekly-conversations .teacher-weekly-table { width:100%; min-width:0; table-layout:fixed; page-break-inside:auto; }
+  .teacher-weekly-conversations .teacher-weekly-table th,
+  .teacher-weekly-conversations .teacher-weekly-table td { min-width:0 !important; width:auto; padding:2pt 2.5pt; font-size:7pt; line-height:1.15; overflow-wrap:anywhere; word-break:break-word; }
+  .teacher-weekly-conversations .teacher-weekly-table th:first-child,
+  .teacher-weekly-conversations .teacher-weekly-table td:first-child { width:16%; min-width:0 !important; }
   .teacher-weekly-conversations .teacher-weekly-table thead { display:table-header-group; }
   .teacher-weekly-conversations .teacher-weekly-table thead { position:static; }
   .teacher-weekly-conversations .teacher-weekly-table tr { display:table-row; }

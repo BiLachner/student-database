@@ -249,6 +249,11 @@ class CurriculumTest {
         assertEquals(3, Curriculum.competitionRank(List.of(100L, 90L, 80L, 80L), 80L));
         assertEquals(10, Curriculum.competitionRank(List.of(100L, 90L, 80L, 70L, 60L, 50L, 40L, 30L, 20L, 10L), 10L));
         assertEquals(11, Curriculum.competitionRank(List.of(100L, 90L, 80L, 70L, 60L, 50L, 40L, 30L, 20L, 10L), 0L));
+        assertEquals(1, Curriculum.studentVisibleRank(1));
+        assertEquals(50, Curriculum.studentVisibleRank(50));
+        assertNull(Curriculum.studentVisibleRank(51));
+        assertNull(Curriculum.studentVisibleRank(143));
+        assertEquals(50, Curriculum.studentVisibleRank(Curriculum.competitionRank(List.of(100L, 90L, 80L, 70L, 60L, 50L), 50L)));
     }
     @Test void tutorTop50UsesCurrentRankingOrderAndLimit() throws Exception {
         db.writeTransaction(c->{
@@ -263,7 +268,33 @@ class CurriculumTest {
         assertEquals(50,((List<?>)result.get("entries")).size());
         assertEquals(scalar("SELECT COUNT(*) FROM students s JOIN classes c ON c.id=s.class WHERE COALESCE(s.active,1)=1 AND s.class<>0 AND c.grade=5"),((Number)result.get("totalParticipants")).longValue());
         assertEquals(1,((Map<?,?>)((List<?>)result.get("entries")).get(0)).get("rank"));
+        assertEquals("Student-0",((Map<?,?>)((List<?>)result.get("entries")).get(0)).get("firstName"));
+        assertEquals("Class-"+id,((Map<?,?>)((List<?>)result.get("entries")).get(0)).get("classLabel"));
         assertThrows(CurriculumException.class,()->service.top50ForTutor(other,5));
+    }
+
+    @Test void studentRankingContractHidesExactPositionsOutsideTop50() throws Exception {
+        int base=id+2000000;
+        db.writeTransaction(c->{
+            exec(c,"UPDATE school_years SET start_date='2026-01-01',end_date='2027-12-31',current_semester=? WHERE id=?",id,id);
+            for(int n=1;n<=51;n++) {
+                int student=base+n;
+                exec(c,"INSERT INTO students(id,first_name,last_name,email,password,class,graduation_level) VALUES(?,?,'Synthetic',?,'unused',?,1)",student,"Rank-"+n,"rank"+student+"@example.invalid",id);
+                exec(c,"INSERT INTO student_curriculum_contexts(student,subject,semester,teacher,class,grade) VALUES(?,?,?,?,?,5)",student,id,id,id,id);
+            }
+            return null;
+        });
+        for(int n=1;n<=51;n++) {
+            int task=service.createCentralTask(topic,"Ranking-"+n,TaskLevel.LEVEL1,n);
+            int student=base+n;
+            db.writeTransaction(c->{exec(c,"INSERT INTO taskstats(student,task,status) VALUES(?,?,2)",student,task);return null;});
+        }
+        var outside=service.rankingForStudent(id);
+        assertEquals(false,outside.get("inTopFifty"));
+        assertNull(outside.get("rank"));
+        var boundary=service.rankingForStudent(base+2);
+        assertEquals(true,boundary.get("inTopFifty"));
+        assertEquals(50,boundary.get("rank"));
     }
 
     @Test void flexibleDeletionIsPreviewedAuthorizedAndAtomicallyRemovesOnlyItsHistory() throws Exception {

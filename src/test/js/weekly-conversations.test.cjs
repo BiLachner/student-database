@@ -3,6 +3,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
 const {JSDOM}=require('jsdom');
+const css=fs.readFileSync(path.join(__dirname,'../../main/resources/css/site/style.css'),'utf8');
 
 const root=path.join(__dirname,'../../main/resources');
 const script=fs.readFileSync(path.join(root,'js/teacher/weekly-conversations.js'),'utf8');
@@ -63,4 +64,12 @@ test('tutor view renders offered WPF subjects as separate compact columns',async
   assert.match(table.querySelector('tbody tr').textContent,/noch kein GN/);
   assert.match(table.querySelectorAll('tbody tr')[1].textContent,/—/);
   instance.window.close();
+});
+
+test('tutor print CSS targets complete A4 landscape width without screen scrolling',()=>{
+  assert.match(css,/@page\s*\{\s*size:\s*A4 landscape;/);
+  assert.match(css,/\.teacher-weekly-conversations \.teacher-weekly-table \{ width:100%; min-width:0; table-layout:fixed;/);
+  assert.match(css,/\.teacher-weekly-conversations \.teacher-weekly-table th:first-child,[\s\S]*?width:16%;/);
+  assert.match(css,/\.teacher-table-scroll \{ overflow:visible; max-height:none;/);
+  assert.match(css,/thead \{ display:table-header-group; \}/);
 });

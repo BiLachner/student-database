@@ -159,6 +159,11 @@ public final class Curriculum {
         return 1 + (int) totals.stream().filter(Objects::nonNull).filter(total -> total > ownTotal).count();
     }
 
+    /** Student-facing contract: exact positions are private outside the Top 50. */
+    static Integer studentVisibleRank(int rank) {
+        return rank >= 1 && rank <= 50 ? rank : null;
+    }
+
     /** Fresh, read-only ranking for the current semester; no rank is stored. */
     public Map<String,Object> rankingForStudent(int studentId) throws SQLException {
         return transaction(c -> {
@@ -167,7 +172,7 @@ public final class Curriculum {
             if (ownClass.isEmpty()) {
                 Map<String,Object> unavailable = new LinkedHashMap<>();
                 unavailable.put("semesterId", semester); unavailable.put("totalValidCoins", 0L);
-                unavailable.put("rank", 0); unavailable.put("rankTotal", 0); unavailable.put("rankAvailable", false);
+                unavailable.put("rank", null); unavailable.put("rankTotal", 0); unavailable.put("rankAvailable", false);
                 unavailable.put("inTopFifty", false); unavailable.put("tieRule", "Gleiche Münzzahl erhält denselben Rang; die Liste zeigt bis zu 50 Einträge.");
                 return unavailable;
             }
@@ -180,7 +185,7 @@ public final class Curriculum {
             Map<String,Object> result = new LinkedHashMap<>();
             result.put("semesterId", semester);
             result.put("totalValidCoins", ownTotal);
-            result.put("rank", rank);
+            result.put("rank", studentVisibleRank(rank));
             result.put("rankTotal", totalsByStudent.size());
             result.put("grade", grade);
             result.put("rankAvailable", true);
@@ -231,15 +236,9 @@ public final class Curriculum {
             if (number(c,"SELECT COUNT(*) FROM curriculum_class_tutors ct JOIN classes cl ON cl.id=ct.class "
                     + "WHERE ct.semester=? AND ct.teacher=? AND cl.grade=?", semester, actor.teacherId(), grade) == 0)
                 throw error(403,"forbidden","Teacher is not a tutor for this grade.");
-            Set<Integer> visibleClasses = new HashSet<>();
-            for (var row : rows(c,"SELECT class FROM curriculum_class_tutors WHERE semester=? AND teacher=?",semester,actor.teacherId()))
-                visibleClasses.add(integer(row,"class"));
             List<Map<String,Object>> allEntries = rankingEntries(c, semester, grade);
             List<Map<String,Object>> entries = allEntries.size() > 50 ? new ArrayList<>(allEntries.subList(0,50)) : allEntries;
             for (var entry : entries) {
-                if (!visibleClasses.contains(integer(entry,"classId"))) {
-                    entry.put("firstName","Teilnehmer:in"); entry.put("lastName",""); entry.put("classLabel","Jahrgang "+grade);
-                }
                 entry.remove("classId");
             }
             Map<String,Object> result = new LinkedHashMap<>();

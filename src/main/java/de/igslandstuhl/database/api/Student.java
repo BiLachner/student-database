@@ -755,7 +755,13 @@ public class Student extends User {
     @Override
     public String toJSON() {
         ensureCurrentRequestsLoaded();
-        Map<String,Object> ranking = Map.of("totalValidCoins", 0L, "rank", 0, "rankTotal", 0, "rankAvailable", false, "inTopTen", false, "inTopFifty", false);
+        Map<String,Object> ranking = new java.util.LinkedHashMap<>();
+        ranking.put("totalValidCoins", 0L);
+        ranking.put("rank", null);
+        ranking.put("rankTotal", 0);
+        ranking.put("rankAvailable", false);
+        ranking.put("inTopTen", false);
+        ranking.put("inTopFifty", false);
         try {
             ranking = Curriculum.current().rankingForStudent(id);
         } catch (SQLException e) {
