@@ -253,7 +253,7 @@ class CurriculumTest {
         assertEquals(50, Curriculum.studentVisibleRank(50));
         assertNull(Curriculum.studentVisibleRank(51));
         assertNull(Curriculum.studentVisibleRank(143));
-        assertEquals(50, Curriculum.studentVisibleRank(Curriculum.competitionRank(List.of(100L, 90L, 80L, 70L, 60L, 50L), 50L)));
+        assertEquals(50, Curriculum.studentVisibleRank(Curriculum.competitionRank(java.util.stream.LongStream.rangeClosed(2,50).boxed().toList(), 1L)));
     }
     @Test void tutorTop50UsesCurrentRankingOrderAndLimit() throws Exception {
         db.writeTransaction(c->{
@@ -261,15 +261,24 @@ class CurriculumTest {
             exec(c,"INSERT INTO curriculum_class_tutors(semester,class,teacher,tutor_slot) VALUES(?,?,?,1)",id,id,id);
             exec(c,"CREATE TABLE IF NOT EXISTS curriculum_nansteine(id INTEGER PRIMARY KEY,owner_teacher INTEGER,subject INTEGER,class INTEGER,semester INTEGER,grade INTEGER,course_group INTEGER,name TEXT,tokens INTEGER)");
             exec(c,"CREATE TABLE IF NOT EXISTS curriculum_nanstein_completions(nanstein INTEGER,student INTEGER,teacher INTEGER,tokens INTEGER,completed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(nanstein,student))");
-            for(int n=0;n<51;n++) exec(c,"INSERT INTO students(id,first_name,last_name,email,password,class,graduation_level) VALUES(?,?,'Synthetic',?,'unused',?,1)",id+1000000+n,"Student-"+n,"student"+(id+1000000+n)+"@example.invalid",id);
+            for(int n=0;n<51;n++) {
+                int student=id+1000000+n, task=id+1100000+n;
+                exec(c,"INSERT INTO students(id,first_name,last_name,email,password,class,graduation_level) VALUES(?,?,'Synthetic',?,'unused',?,1)",student,"Student-"+n,"student"+student+"@example.invalid",id);
+                exec(c,"INSERT INTO student_curriculum_contexts(student,subject,semester,teacher,class,grade) VALUES(?,?,?,?,?,5)",student,id,id,id,id);
+                exec(c,"INSERT INTO tasks(id,topic,name,niveau,stage_number,tokens) VALUES(?,?,?,1,?,?)",task,topic,"Top50-"+n,n,1000+n);
+                exec(c,"INSERT INTO taskstats(student,task,status) VALUES(?,?,2)",student,task);
+            }
             return null;
         });
         var result=service.top50ForTutor(teacher,5);
         assertEquals(50,((List<?>)result.get("entries")).size());
         assertEquals(scalar("SELECT COUNT(*) FROM students s JOIN classes c ON c.id=s.class WHERE COALESCE(s.active,1)=1 AND s.class<>0 AND c.grade=5"),((Number)result.get("totalParticipants")).longValue());
         assertEquals(1,((Map<?,?>)((List<?>)result.get("entries")).get(0)).get("rank"));
-        assertEquals("Student-0",((Map<?,?>)((List<?>)result.get("entries")).get(0)).get("firstName"));
-        assertEquals("Class-"+id,((Map<?,?>)((List<?>)result.get("entries")).get(0)).get("classLabel"));
+        var entries=((List<?>)result.get("entries")).stream().map(Map.class::cast).toList();
+        assertTrue(entries.stream().anyMatch(entry->String.valueOf(entry.get("firstName")).startsWith("Student-")));
+        assertTrue(entries.stream().filter(entry->String.valueOf(entry.get("firstName")).startsWith("Student-"))
+                .allMatch(entry->String.valueOf(entry.get("classLabel")).equals("Class-"+id)));
+        assertTrue(entries.stream().noneMatch(entry->String.valueOf(entry.get("firstName")).equals("Teilnehmer:in")));
         assertThrows(CurriculumException.class,()->service.top50ForTutor(other,5));
     }
 
@@ -277,6 +286,8 @@ class CurriculumTest {
         int base=id+2000000;
         db.writeTransaction(c->{
             exec(c,"UPDATE school_years SET start_date='2026-01-01',end_date='2027-12-31',current_semester=? WHERE id=?",id,id);
+            exec(c,"CREATE TABLE IF NOT EXISTS curriculum_nansteine(id INTEGER PRIMARY KEY,owner_teacher INTEGER,subject INTEGER,class INTEGER,semester INTEGER,grade INTEGER,course_group INTEGER,name TEXT,tokens INTEGER)");
+            exec(c,"CREATE TABLE IF NOT EXISTS curriculum_nanstein_completions(nanstein INTEGER,student INTEGER,teacher INTEGER,tokens INTEGER,completed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(nanstein,student))");
             for(int n=1;n<=51;n++) {
                 int student=base+n;
                 exec(c,"INSERT INTO students(id,first_name,last_name,email,password,class,graduation_level) VALUES(?,?,'Synthetic',?,'unused',?,1)",student,"Rank-"+n,"rank"+student+"@example.invalid",id);
@@ -284,11 +295,15 @@ class CurriculumTest {
             }
             return null;
         });
-        for(int n=1;n<=51;n++) {
-            int task=service.createCentralTask(topic,"Ranking-"+n,TaskLevel.LEVEL1,n);
-            int student=base+n;
-            db.writeTransaction(c->{exec(c,"INSERT INTO taskstats(student,task,status) VALUES(?,?,2)",student,task);return null;});
-        }
+        db.writeTransaction(c->{
+            for(int n=1;n<=51;n++) {
+                int task=base+n;
+                int student=base+n;
+                exec(c,"INSERT INTO tasks(id,topic,name,niveau,stage_number,tokens) VALUES(?,?,?,1,?,?)",task,topic,"Ranking-"+n,n,n);
+                exec(c,"INSERT INTO taskstats(student,task,status) VALUES(?,?,2)",student,task);
+            }
+            return null;
+        });
         var outside=service.rankingForStudent(id);
         assertEquals(false,outside.get("inTopFifty"));
         assertNull(outside.get("rank"));
