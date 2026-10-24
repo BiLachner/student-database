@@ -238,7 +238,13 @@ public final class Curriculum {
                 throw error(403,"forbidden","Teacher is not a tutor for this grade.");
             List<Map<String,Object>> allEntries = rankingEntries(c, semester, grade);
             List<Map<String,Object>> entries = allEntries.size() > 50 ? new ArrayList<>(allEntries.subList(0,50)) : allEntries;
+            Set<Integer> visibleClasses = new HashSet<>();
+            for (var row : rows(c,"SELECT class FROM curriculum_class_tutors WHERE semester=? AND teacher=?",semester,actor.teacherId()))
+                visibleClasses.add(integer(row,"class"));
             for (var entry : entries) {
+                if (!visibleClasses.contains(integer(entry,"classId"))) {
+                    entry.put("firstName","Teilnehmer:in"); entry.put("lastName","");
+                }
                 entry.remove("classId");
             }
             Map<String,Object> result = new LinkedHashMap<>();
