@@ -78,7 +78,7 @@ async function setup(admin, options={}){
   }
   else if(url==='/curriculum-catalog')body=catalog;
   else if(url==='/curriculum-nansteine')body=nansteine;
-  else if(url==='/nanstein-delete-preview')body={nansteinId:data.nansteinId,assignmentCount:0,completionCount:0,currentSemester:true,canDelete:true};
+  else if(url==='/nanstein-delete-preview')body={nansteinId:data.nansteinId,assignmentCount:Number(options.nansteinAssignmentCount||0),completionCount:Number(options.nansteinCompletionCount||0),currentSemester:true,canDelete:Number(options.nansteinCompletionCount||0)===0};
   else if(url==='/delete-nanstein'){nansteine=nansteine.filter(item=>item.id!==data.nansteinId);body={deleted:true,assignmentCount:0};}
   else if(url==='/curriculum-teacher-roster')body=options.rosterHandler?await options.rosterHandler(data):(options.roster ?? defaultRoster);
   else if(url==='/curriculum-student-progress-detail')body=options.detailHandler?await options.detailHandler(data):{...progressDetail,studentId:data.studentId};
@@ -1014,5 +1014,37 @@ test('real Nanstein delete button performs preview, delete request and refreshes
   assert.deepEqual(requests.filter(r=>r.url==='/nanstein-delete-preview').at(-1).data,{nansteinId:nanstein.id});
   assert.deepEqual(requests.filter(r=>r.url==='/delete-nanstein').at(-1).data,{nansteinId:nanstein.id});
   assert.equal([...root.querySelectorAll('li')].some(item=>item.textContent.includes(nanstein.name)),false);
+ }finally{dom.window.close();}
+});
+
+test('real Nanstein delete button keeps an open assigned Nanstein deletable and removes it from the DOM',async()=>{
+ const nanstein={id:92,name:'Zugewiesener offener Nanstein',tokens:7};
+ const{dom,root,requests}=await setup(false,{nansteine:[nanstein],nansteinAssignmentCount:1,nansteinCompletionCount:0,pm:{...grants(),curriculum_manage_nansteine:true}});
+ try{
+  dom.window.confirm=()=>true;
+  const row=[...root.querySelectorAll('li')].find(item=>item.textContent.includes(nanstein.name));
+  assert.ok(row,'assigned Nanstein row is rendered');
+  const remove=[...row.querySelectorAll('button')].find(button=>button.textContent==='Löschen');
+  assert.ok(remove,'assigned Nanstein delete button is rendered');
+  remove.click();
+  await tick();
+  await tick();
+  assert.deepEqual(requests.filter(r=>r.url==='/nanstein-delete-preview').at(-1).data,{nansteinId:nanstein.id});
+  assert.deepEqual(requests.filter(r=>r.url==='/delete-nanstein').at(-1).data,{nansteinId:nanstein.id});
+  assert.equal([...root.querySelectorAll('li')].some(item=>item.textContent.includes(nanstein.name)),false);
+ }finally{dom.window.close();}
+});
+
+test('real Nanstein delete button keeps a completed Nanstein protected',async()=>{
+ const nanstein={id:93,name:'Abgeschlossener geschützter Nanstein',tokens:7};
+ const{dom,root,requests}=await setup(false,{nansteine:[nanstein],nansteinAssignmentCount:1,nansteinCompletionCount:1,pm:{...grants(),curriculum_manage_nansteine:true}});
+ try{
+  const row=[...root.querySelectorAll('li')].find(item=>item.textContent.includes(nanstein.name));
+  const remove=[...row.querySelectorAll('button')].find(button=>button.textContent==='Löschen');
+  remove.click();
+  await tick();
+  assert.equal(requests.filter(r=>r.url==='/nanstein-delete-preview').length,1);
+  assert.equal(requests.filter(r=>r.url==='/delete-nanstein').length,0);
+  assert.equal([...root.querySelectorAll('li')].some(item=>item.textContent.includes(nanstein.name)),true);
  }finally{dom.window.close();}
 });
