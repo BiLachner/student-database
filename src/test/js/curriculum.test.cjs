@@ -55,6 +55,7 @@ async function setup(admin, options={}){
   {type:'FLEXIBLE',stageId:101,topicId:null,topicName:null,name:'Unassessed flexible',tokens:9,status:null,earned:false,inProgress:false}
  ]};
  let progressDetail=options.detail ?? defaultProgressDetail;
+ let nansteine=structuredClone(options.nansteine ?? []);
  dom.window.fetch=async(url,requestOptions)=>{
   const data=JSON.parse(requestOptions.body);requests.push({url,data});let body;let ok=true;
   if(options.response?.url===url)return {ok:false,status:options.response.status,text:async()=>options.response.body};
@@ -76,6 +77,9 @@ async function setup(admin, options={}){
    body={ok:true};
   }
   else if(url==='/curriculum-catalog')body=catalog;
+  else if(url==='/curriculum-nansteine')body=nansteine;
+  else if(url==='/nanstein-delete-preview')body={nansteinId:data.nansteinId,assignmentCount:0,completionCount:0,currentSemester:true,canDelete:true};
+  else if(url==='/delete-nanstein'){nansteine=nansteine.filter(item=>item.id!==data.nansteinId);body={deleted:true,assignmentCount:0};}
   else if(url==='/curriculum-teacher-roster')body=options.rosterHandler?await options.rosterHandler(data):(options.roster ?? defaultRoster);
   else if(url==='/curriculum-student-progress-detail')body=options.detailHandler?await options.detailHandler(data):{...progressDetail,studentId:data.studentId};
   else if(url==='/set-curriculum-stage-assessment'){
@@ -991,5 +995,24 @@ test('central overview subject and text filters work without unsafe html',async(
   text.value='central';text.dispatchEvent(new dom.window.Event('input'));await tick();
   assert.match(panel.querySelector('table').textContent,/Central/);
   assert.equal(panel.querySelectorAll('script,img').length,0);
+ }finally{dom.window.close();}
+});
+
+test('real Nanstein delete button performs preview, delete request and refreshes the DOM',async()=>{
+ const nanstein={id:91,name:'Synthetischer Nanstein',tokens:7};
+ const{dom,root,requests}=await setup(false,{nansteine:[nanstein],pm:{...grants(),curriculum_manage_nansteine:true}});
+ try{
+  dom.window.confirm=()=>true;
+  const row=[...root.querySelectorAll('li')].find(item=>item.textContent.includes(nanstein.name));
+  assert.ok(row,'Nanstein row is rendered');
+  const remove=[...row.querySelectorAll('button')].find(button=>button.textContent==='Löschen');
+  assert.ok(remove,'Löschen button is rendered');
+  assert.equal(remove.disabled,false);
+  remove.click();
+  await tick();
+  await tick();
+  assert.deepEqual(requests.filter(r=>r.url==='/nanstein-delete-preview').at(-1).data,{nansteinId:nanstein.id});
+  assert.deepEqual(requests.filter(r=>r.url==='/delete-nanstein').at(-1).data,{nansteinId:nanstein.id});
+  assert.equal([...root.querySelectorAll('li')].some(item=>item.textContent.includes(nanstein.name)),false);
  }finally{dom.window.close();}
 });
