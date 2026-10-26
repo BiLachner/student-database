@@ -856,6 +856,27 @@ class CurriculumTest {
         db.writeTransaction(c->{exec(c,"INSERT INTO curriculum_class_teachers(semester,class,subject,teacher) VALUES(?,?,?,?)",id,id,id,id);exec(c,"DELETE FROM student_curriculum_contexts WHERE teacher=? AND class=? AND subject=? AND semester=?",id,id,id,id);return null;});
         assertTrue(service.teacherRoster(teacher,scope).isEmpty());
     }
+    @Test void teacherRosterProgressCountsVariableAwardsAndNansteineOnceInExactContext() throws Exception {
+        db.writeTransaction(c->{
+            exec(c,"INSERT INTO curriculum_class_teachers(semester,class,subject,teacher) VALUES(?,?,?,?)",id,id,id,id);
+            exec(c,"CREATE TABLE IF NOT EXISTS curriculum_nansteine(id INTEGER PRIMARY KEY,owner_teacher INTEGER,subject INTEGER,class INTEGER,semester INTEGER,grade INTEGER,course_group INTEGER,name TEXT,tokens INTEGER)");
+            exec(c,"CREATE TABLE IF NOT EXISTS curriculum_nanstein_assignments(nanstein INTEGER,student INTEGER,PRIMARY KEY(nanstein,student))");
+            exec(c,"CREATE TABLE IF NOT EXISTS curriculum_nanstein_completions(nanstein INTEGER,student INTEGER,teacher INTEGER,tokens INTEGER,completed_at TEXT,PRIMARY KEY(nanstein,student))");
+            return null;
+        });
+        int central=centralNamed("Roster central",5); releaseAllCentral(); service.activateCentralStage(id,central);
+        var flexible=service.create(teacher,scope,"Variable roster",10,true);
+        new CurriculumEnrollment(service).release(teacher,scope,null,null,null,flexible.id(),true);
+        service.complete(teacher,flexible.id(),id,3);
+        var open=service.createNanstein(teacher,scope,"Open nanstein",7);
+        var completed=service.createNanstein(teacher,scope,"Completed nanstein",8);
+        service.assignNanstein(teacher,open.id(),id); service.assignNanstein(teacher,completed.id(),id); service.completeNanstein(teacher,completed.id(),id);
+        var progress=(Map<String,Object>)byId(service.teacherRoster(teacher,scope),id).get("progress");
+        assertEquals(30,progress.get("releasedTokens"));
+        assertEquals(11,progress.get("earnedTokens"));
+        assertNotNull(progress.get("lastAssessedAt"));
+        assertEquals(1,service.teacherRoster(teacher,scope).stream().filter(r->((Number)r.get("id")).intValue()==id).count());
+    }
     @Test void teacherRosterSupportsIndividualContexts() throws Exception {
         int visible=id+2,alsoVisible=id+3,hidden=id+4;
         db.writeTransaction(c->{
