@@ -1532,12 +1532,16 @@ public final class Curriculum {
         boolean individual=individualSubject(c,scope.subjectId());
         boolean ungrouped=individual && number(c,"SELECT COUNT(*) FROM course_groups WHERE subject=? AND grade=? AND semester=?",
                 scope.subjectId(),grade,scope.semesterId())==0;
+        Set<Integer> earnedCentral=earnedRosterCentralStages(c,studentId,scope,grade,stages);
+        Map<Integer,Integer> earnedFlexible=earnedRosterFlexibleStages(c,studentId,scope,grade,stages,individual);
         int possible=0,earned=0;
         for(RosterStage stage:stages) {
-            StageAssessment assessment=stageAssessment(c,studentId,scope,stage.type(),stage.id(),grade);
-            if(!stage.released()&&!assessment.earned()) continue;
+            boolean stageEarned=stage.type()==ActiveStageType.CENTRAL
+                    ?earnedCentral.contains(stage.id()):earnedFlexible.containsKey(stage.id());
+            if(!stage.released()&&!stageEarned) continue;
             possible+=stage.tokens();
-            if(assessment.earned()) earned+=assessment.awardedTokens()!=null?assessment.awardedTokens():stage.tokens();
+            if(stageEarned) earned+=stage.type()==ActiveStageType.FLEXIBLE
+                    ?earnedFlexible.get(stage.id()):stage.tokens();
         }
         boolean hasNansteine=!ungrouped && number(c,"SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='curriculum_nansteine'")>0
                 && number(c,"SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='curriculum_nanstein_assignments'")>0
@@ -1556,6 +1560,28 @@ public final class Curriculum {
         }
         Map<String,Object> progress=new LinkedHashMap<>(); progress.put("releasedTokens",possible); progress.put("earnedTokens",earned);
         progress.put("lastAssessedAt",teacherRosterLastAssessed(c,studentId,scope,grade,stages)); return progress;
+    }
+    private static Set<Integer> earnedRosterCentralStages(Connection c,int studentId,Scope scope,int grade,List<RosterStage> stages) throws SQLException {
+        List<Integer> ids=stages.stream().filter(s->s.type()==ActiveStageType.CENTRAL).map(RosterStage::id).toList();
+        if(ids.isEmpty()) return Set.of();
+        List<Object> args=new ArrayList<>(); args.add(studentId); args.add(Task.STATUS_COMPLETED); args.addAll(ids);
+        args.add(scope.subjectId()); args.add(scope.semesterId()); args.add(grade);
+        String sql="SELECT x.task FROM taskstats x JOIN tasks t ON t.id=x.task JOIN topics p ON p.id=t.topic "
+                +"WHERE x.student=? AND x.status=? AND x.task IN("+placeholders(ids.size())+") AND p.subject=? AND p.semester=? AND p.grade=?";
+        return rows(c,sql,args.toArray()).stream().map(row->integer(row,"task")).collect(java.util.stream.Collectors.toSet());
+    }
+    private static Map<Integer,Integer> earnedRosterFlexibleStages(Connection c,int studentId,Scope scope,int grade,List<RosterStage> stages,boolean individual) throws SQLException {
+        List<Integer> ids=stages.stream().filter(s->s.type()==ActiveStageType.FLEXIBLE).map(RosterStage::id).toList();
+        if(ids.isEmpty()) return Map.of();
+        String filter=individual?"t.course_group=?":"t.owner_teacher=? AND t.class=?";
+        List<Object> args=new ArrayList<>(); args.add(studentId); args.addAll(ids); args.add(scope.subjectId()); args.add(scope.semesterId()); args.add(grade);
+        if(individual) args.add(resolveScope(c,scope).courseGroupId()); else { args.add(scope.teacherId()); args.add(scope.classId()); }
+        String sql="SELECT x.flexible_task,COALESCE(x.awarded_tokens,t.tokens) AS awardedTokens FROM completed_flexible_tasks x "
+                +"JOIN flexible_tasks t ON t.id=x.flexible_task WHERE x.student=? AND x.flexible_task IN("+placeholders(ids.size())+") "
+                +"AND t.subject=? AND t.semester=? AND t.grade=? AND "+filter+" AND "+ACTIVE_COMPLETION;
+        Map<Integer,Integer> result=new HashMap<>();
+        for(var row:rows(c,sql,args.toArray())) result.put(integer(row,"flexible_task"),integer(row,"awardedTokens"));
+        return result;
     }
     private static String teacherRosterLastAssessed(Connection c,int studentId,Scope scope,int grade,List<RosterStage> stages) throws SQLException {
         List<Object> args=new ArrayList<>(List.of(studentId,scope.subjectId(),scope.semesterId()));
